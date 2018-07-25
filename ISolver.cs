@@ -75,9 +75,6 @@ namespace CPF_experiment
         Dictionary<int, int> GetExternalConflictCounts();
         Dictionary<int, List<int>> GetConflictTimes();
 
-        Dictionary<int, List<int>> GetConflictTimesBias();
-
-        Dictionary<int, List<double>> GetConflictProbability();
         int GetAccumulatedExpanded();
         int GetAccumulatedGenerated();
     }

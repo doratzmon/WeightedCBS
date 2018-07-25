@@ -56,20 +56,6 @@ namespace CPF_experiment
             return 0;
         }
 
-        /// <summary>
-        /// Expands a node. This is done recursively - generating agent possibilities one at a time.
-        /// This includes:
-        /// - Generating the children
-        /// - Inserting them into OPEN
-        /// - Insert node into CLOSED
-        /// Why does a PDB need to know how to expand nodes? Seems like someone else's job
-        /// </summary>
-        /// <param name="currentNode">The node to expand</param>
-        /// <param name="children">The generated nodes will be filled into this collection</param>
-        public void Expand(WorldState currentNode, ICollection<WorldState> children)
-        {
-            this.Expand(currentNode, 0, children, new HashSet<Move>()); // TODO: Need to think if HashSet is the correct option here.
-        }
 
         /// <summary>
         /// Expands a node. This is done recursively - generating agent possibilities one at a time.

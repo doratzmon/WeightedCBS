@@ -3,7 +3,6 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 
-using ExtensionMethods;
 using System.Text;
 using System.IO;
 
@@ -48,21 +47,16 @@ namespace CPF_experiment
         public Dictionary<int, List<int>>[] conflictTimesPerAgent;
         /// For each agent in the problem instance, maps agent _nums_ of agents it collides with to the time bias of their first collision. (for range conflict)
         /// </summary>
-        public Dictionary<int, List<int>>[] conflictTimesBiasPerAgent;
-        public Dictionary<int, List<double>>[] conflictProbabilityPerAgent;
         private int binaryHeapIndex;
         public CbsConflict conflict;
         public CbsConstraint constraint;
         /// <summary>
         /// Forcing an agent to be at a certain place at a certain time
         /// </summary>
-        CbsConstraint mustConstraint;
         public CbsNode prev;
         public ushort depth;
         public ushort[] agentsGroupAssignment;
         public ushort replanSize;
-        public static int maxPlanSizeForPRobust;
-        public double pRobustNoCollisionProb;
         public enum ExpansionState: byte
         {
             NOT_EXPANDED = 0,
@@ -80,7 +74,7 @@ namespace CPF_experiment
         //public ProblemInstance problem;
         protected ICbsSolver solver;
         protected ICbsSolver singleAgentSolver;
-        protected CBS_LocalConflicts cbs;
+        protected CBS cbs;
         public Dictionary<int, int> agentNumToIndex;
         public bool parentAlreadyLookedAheadOf;
         /// <summary>
@@ -95,19 +89,15 @@ namespace CPF_experiment
         /// For tie-breaking
         /// </summary>
         public int totalConflictsBetweenInternalAgents;
-        public MDD[] mdds;
 
-        public CbsNode(int numberOfAgents, ICbsSolver solver, ICbsSolver singleAgentSolver, CBS_LocalConflicts cbs, ushort[] agentsGroupAssignment = null)
+        public CbsNode(int numberOfAgents, ICbsSolver solver, ICbsSolver singleAgentSolver, CBS cbs, ushort[] agentsGroupAssignment = null)
         {
             this.cbs = cbs;
             allSingleAgentPlans = new SinglePlan[numberOfAgents];
             allSingleAgentCosts = new int[numberOfAgents];
-            mdds = new MDD[numberOfAgents];
             countsOfInternalAgentsThatConflict = new int[numberOfAgents];
             conflictCountsPerAgent = new Dictionary<int, int>[numberOfAgents]; // Populated after Solve()
             conflictTimesPerAgent = new Dictionary<int, List<int>>[numberOfAgents]; // Populated after Solve()
-            conflictTimesBiasPerAgent = new Dictionary<int, List<int>>[numberOfAgents]; // Populated after Solve()
-            conflictProbabilityPerAgent = new Dictionary<int, List<double>>[numberOfAgents]; // Populated after Solve()
             if (agentsGroupAssignment == null)
             {
                 this.agentsGroupAssignment = new ushort[numberOfAgents];
@@ -144,8 +134,6 @@ namespace CPF_experiment
             this.agentToReplan = agentToReplan;
             this.allSingleAgentPlans = father.allSingleAgentPlans.ToArray<SinglePlan>();
             this.allSingleAgentCosts = father.allSingleAgentCosts.ToArray<int>();
-            this.mdds = father.mdds.ToArray<MDD>();
-            this.mdds[agentToReplan] = null; // This agent has a new constraint, its old MDD isn't relevant anymore.
             this.countsOfInternalAgentsThatConflict = father.countsOfInternalAgentsThatConflict.ToArray<int>();
             this.conflictCountsPerAgent = new Dictionary<int, int>[father.conflictCountsPerAgent.Length];
             for (int i = 0; i < this.conflictCountsPerAgent.Length; i++)
@@ -157,20 +145,7 @@ namespace CPF_experiment
                 foreach (var kvp in father.conflictTimesPerAgent[i])
                     this.conflictTimesPerAgent[i][kvp.Key] = new List<int>(kvp.Value);
             }
-            this.conflictTimesBiasPerAgent = new Dictionary<int, List<int>>[father.conflictTimesBiasPerAgent.Length];
-            for (int i = 0; i < this.conflictTimesBiasPerAgent.Length; i++)
-            {
-                this.conflictTimesBiasPerAgent[i] = new Dictionary<int, List<int>>(); // Need a separate copy because unlike plans, the conflict counts for agents that aren't replanned do change.
-                foreach (var kvp in father.conflictTimesBiasPerAgent[i])
-                    this.conflictTimesBiasPerAgent[i][kvp.Key] = new List<int>(kvp.Value);
-            }
-            this.conflictProbabilityPerAgent = new Dictionary<int, List<double>>[father.conflictProbabilityPerAgent.Length];
-            for (int i = 0; i < this.conflictProbabilityPerAgent.Length; i++)
-            {
-                this.conflictProbabilityPerAgent[i] = new Dictionary<int, List<double>>(); // Need a separate copy because unlike plans, the conflict counts for agents that aren't replanned do change.
-                foreach (var kvp in father.conflictProbabilityPerAgent[i])
-                    this.conflictProbabilityPerAgent[i][kvp.Key] = new List<double>(kvp.Value);
-            }
+           
             this.agentsGroupAssignment = father.agentsGroupAssignment.ToArray<ushort>();
             this.agentNumToIndex = father.agentNumToIndex;
             this.prev = father;
@@ -194,7 +169,6 @@ namespace CPF_experiment
         {
             this.allSingleAgentPlans = father.allSingleAgentPlans.ToArray<SinglePlan>();
             this.allSingleAgentCosts = father.allSingleAgentCosts.ToArray<int>();
-            this.mdds = father.mdds.ToArray<MDD>(); // No new constraint was added so all of the parent's MDDs are valid
             this.countsOfInternalAgentsThatConflict = father.countsOfInternalAgentsThatConflict.ToArray<int>();
             this.conflictCountsPerAgent = new Dictionary<int, int>[father.conflictCountsPerAgent.Length];
             for (int i = 0; i < this.conflictCountsPerAgent.Length; i++)
@@ -206,20 +180,7 @@ namespace CPF_experiment
                 foreach (var kvp in father.conflictTimesPerAgent[i])
                     this.conflictTimesPerAgent[i][kvp.Key] = new List<int>(kvp.Value);
             }
-            this.conflictTimesBiasPerAgent = new Dictionary<int, List<int>>[father.conflictTimesBiasPerAgent.Length];
-            for (int i = 0; i < this.conflictTimesBiasPerAgent.Length; i++)
-            {
-                this.conflictTimesBiasPerAgent[i] = new Dictionary<int, List<int>>(); // Need a separate copy because unlike plans, the conflict counts for agents that aren't replanned do change.
-                foreach (var kvp in father.conflictTimesBiasPerAgent[i])
-                    this.conflictTimesBiasPerAgent[i][kvp.Key] = new List<int>(kvp.Value);
-            }
-            this.conflictProbabilityPerAgent = new Dictionary<int, List<double>>[father.conflictProbabilityPerAgent.Length];
-            for (int i = 0; i < this.conflictProbabilityPerAgent.Length; i++)
-            {
-                this.conflictProbabilityPerAgent[i] = new Dictionary<int, List<double>>(); // Need a separate copy because unlike plans, the conflict counts for agents that aren't replanned do change.
-                foreach (var kvp in father.conflictProbabilityPerAgent[i])
-                    this.conflictProbabilityPerAgent[i][kvp.Key] = new List<double>(kvp.Value);
-            }
+           
             this.agentsGroupAssignment = father.agentsGroupAssignment.ToArray<ushort>();
             this.agentNumToIndex = father.agentNumToIndex;
             this.prev = father;
@@ -231,8 +192,7 @@ namespace CPF_experiment
             this.solver = father.solver;
             this.singleAgentSolver = father.singleAgentSolver;
             this.cbs = father.cbs;
-            
-            this.MergeGroups(mergeGroupA, mergeGroupB);
+
         }
 
         public int f
@@ -252,18 +212,9 @@ namespace CPF_experiment
             ProblemInstance problem = this.cbs.GetProblemInstance();
             var internalCAT = new ConflictAvoidanceTable();
             HashSet<CbsConstraint> newConstraints = this.GetConstraints(); // Probably empty as this is probably the root of the CT.
-            var CAT = (Dictionary_U<TimedMove, int>)problem.parameters[CBS_LocalConflicts.CAT];
-            var constraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.CONSTRAINTS];
+            var CAT = (Dictionary_U<TimedMove, int>)problem.parameters[CBS.CAT];
+            var constraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS.CONSTRAINTS];
 
-            HashSet_U<CbsConstraint> mustConstraints = null;
-            HashSet<CbsConstraint> newMustConstraints = null;
-            Dictionary<int,int> agentsWithMustConstraints = null;
-            if (problem.parameters.ContainsKey(CBS_LocalConflicts.MUST_CONSTRAINTS))
-            {
-                mustConstraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.MUST_CONSTRAINTS];
-                newMustConstraints = this.GetMustConstraints();
-                agentsWithMustConstraints = mustConstraints.Select<CbsConstraint, int>(constraint => constraint.agentNum).Distinct().ToDictionary<int, int>(x => x); // ToDictionary because there's no ToSet...
-            }
 
             Dictionary<int, int> agentsWithConstraints = null;
             if (constraints.Count != 0)
@@ -275,8 +226,7 @@ namespace CPF_experiment
 
             constraints.Join(newConstraints);
             CAT.Join(internalCAT);
-            if (mustConstraints != null)
-                mustConstraints.Join(newMustConstraints);
+
             // This mechanism of adding the constraints to the possibly pre-existing constraints allows having
             // layers of CBS solvers, each one adding its own constraints and respecting those of the solvers above it.
 
@@ -299,22 +249,19 @@ namespace CPF_experiment
                 List<AgentState> subGroup = subGroups[i];
 
                 bool agentGroupHasConstraints = (agentsWithConstraints != null) && subGroup.Any<AgentState>(state => agentsWithConstraints.ContainsKey(state.agent.agentNum));
-                bool agentGroupHasMustConstraints = (agentsWithMustConstraints != null) && subGroup.Any<AgentState>(state => agentsWithMustConstraints.ContainsKey(state.agent.agentNum));
 
                 // Solve for a single agent:
                 if (agentGroupHasConstraints == false  &&
-                    agentGroupHasMustConstraints == false &&
                     subGroup.Count == 1) // Top-most CBS with no must constraints on this agent. Shortcut available (that doesn't consider the CAT, though)
                 {
                     allSingleAgentPlans[i] = new SinglePlan(problem.m_vAgents[i]); // All moves up to starting pos
                     allSingleAgentPlans[i].agentNum = problem.m_vAgents[this.agentsGroupAssignment[i]].agent.agentNum; // Use the group's representative
                     SinglePlan optimalPlan = problem.GetSingleAgentOptimalPlan(
                                     problem.m_vAgents[i],
-                                    out this.conflictCountsPerAgent[i], out this.conflictTimesPerAgent[i], out this.conflictTimesBiasPerAgent[i], out this.conflictProbabilityPerAgent[i], cbs.conflictRange);
+                                    out this.conflictCountsPerAgent[i], out this.conflictTimesPerAgent[i]);
                     allSingleAgentPlans[i].ContinueWith(optimalPlan);
                     allSingleAgentCosts[i] = problem.m_vAgents[i].g + problem.GetSingleAgentOptimalCost(problem.m_vAgents[i]);
                     totalCost += (ushort)allSingleAgentCosts[i];
-                    maxPlanSizeForPRobust = getMaxSinglePathSize(allSingleAgentPlans);
 
                     this.UpdateAtGoalConflictCounts(i, maxPlanSize, CAT);   
                 }
@@ -335,8 +282,6 @@ namespace CPF_experiment
 
             CAT.Separate(internalCAT);
             constraints.Separate(newConstraints);
-            if (mustConstraints != null)
-                mustConstraints.Separate(newMustConstraints);
 
             if (!success)
                 return false;
@@ -359,19 +304,8 @@ namespace CPF_experiment
 
                         if(this.conflictTimesPerAgent[i][pair.Key] != null)
                         {
-                            this.conflictTimesBiasPerAgent[this.agentNumToIndex[pair.Key]]
-                            [problem.m_vAgents[i].agent.agentNum] = new List<int>(this.conflictTimesBiasPerAgent[i][pair.Key]);
-                            this.conflictProbabilityPerAgent[this.agentNumToIndex[pair.Key]]
-                            [problem.m_vAgents[i].agent.agentNum] = new List<double>(this.conflictProbabilityPerAgent[i][pair.Key]);
                             this.conflictTimesPerAgent[this.agentNumToIndex[pair.Key]]
                             [problem.m_vAgents[i].agent.agentNum] = new List<int>(this.conflictTimesPerAgent[i][pair.Key]);
-
-                            for(int f = 0; f < this.conflictTimesPerAgent[this.agentNumToIndex[pair.Key]][problem.m_vAgents[i].agent.agentNum].Count; f++)
-                            {
-                                this.conflictTimesPerAgent[this.agentNumToIndex[pair.Key]]
-                                [problem.m_vAgents[i].agent.agentNum][f] += this.conflictTimesBiasPerAgent[this.agentNumToIndex[pair.Key]][problem.m_vAgents[i].agent.agentNum][f];
-                                this.conflictTimesBiasPerAgent[this.agentNumToIndex[pair.Key]][problem.m_vAgents[i].agent.agentNum][f] *= -1;
-                            }
                         }
 
 
@@ -392,16 +326,8 @@ namespace CPF_experiment
             //end debug
 
             this.CalcMinOpsToSolve();
-            if (getConflictRange() == -1)
-            {
-                if (this.isPRobustGoal())
-                {
-                    LinkedList<List<Move>> currentList = singleAgentPathsToList(allSingleAgentPlans);
-                    this.isGoal = this.cbs.runner.isGoalEmpirically(problem, solver, PRobustBound, currentList, listTime);
-                }
-            }
-            else
-                this.isGoal = this.countsOfInternalAgentsThatConflict.All(i => i == 0);
+
+            this.isGoal = this.countsOfInternalAgentsThatConflict.All(i => i == 0);
             return true;
         }
 
@@ -418,10 +344,6 @@ namespace CPF_experiment
             return max;
         }
 
-        public int getConflictRange()
-        {
-            return cbs.conflictRange;
-        }
 
         private void printConflicts(SinglePlan[] allSingleAgentPlans)
         {
@@ -429,16 +351,10 @@ namespace CPF_experiment
             {
                 Dictionary<int,int> agentCountDictionary                    = conflictCountsPerAgent[agentDictionaryIndex];
                 Dictionary<int, List<int>> agentTimesDictionary             = conflictTimesPerAgent[agentDictionaryIndex];
-                Dictionary<int, List<int>> agentTimesBiasDictionary         = conflictTimesBiasPerAgent[agentDictionaryIndex];
-                Dictionary<int, List<double>> agentProbabilityDictionary    = conflictProbabilityPerAgent[agentDictionaryIndex];
                 
-                //for(int colideAgentIndex = 0; colideAgentIndex < agentTimesDictionary.Count; colideAgentIndex++)
                 foreach(int key in agentTimesDictionary.Keys)
                 {
-                    //int realIndex = agentTimesDictionary.Keys[colideAgentIndex];
                     List<int> agentTimesDictionaryList       = agentTimesDictionary[key];
-                    List<int> agentTimesBiasDictionaryList   = agentTimesBiasDictionary[key];
-                    List<double> agentProbabilityDictionaryList = agentProbabilityDictionary[key];
                     for(int i = 0; i < agentTimesDictionaryList.Count; i++)
                     {
                         Move move;
@@ -446,7 +362,7 @@ namespace CPF_experiment
                             move = allSingleAgentPlans[agentDictionaryIndex].locationAtTimes[allSingleAgentPlans[agentDictionaryIndex].locationAtTimes.Count - 1];
                         else
                             move = allSingleAgentPlans[agentDictionaryIndex].locationAtTimes[agentTimesDictionaryList[i]];
-                        Console.WriteLine("Agent " + agentDictionaryIndex + " Collinding Agent " + key + " At Time " + agentTimesDictionaryList[i] + " Bias " + agentTimesBiasDictionaryList[i] + " Location " + move + " Prob. " + agentProbabilityDictionaryList[i]);
+                        Console.WriteLine("Agent " + agentDictionaryIndex + " Collinding Agent " + key + " At Time " + agentTimesDictionaryList[i] + " Location " + move);
                     }
                 }
             }
@@ -482,8 +398,7 @@ namespace CPF_experiment
             for (int agentNumber = 1; agentNumber < node.Value.Count + 1; agentNumber++)
             {
                 columns[agentNumber] = (agentNumber - 1).ToString();
-                //agentNumber++;
-                //node = node.Next;
+
             }
             node = toPrint.First;
             PrintRow(writeToFile, columns);
@@ -499,10 +414,7 @@ namespace CPF_experiment
                 for (int i = 0; i < currentMoves.Count; i++)
                 {
                     Move currentMove = currentMoves[i];
-                    //Console.Write("(" + currentMove.x + "," + currentMove.y + ")");
                     columns[i + 1] = currentMove.x + "," + currentMove.y;
-                    //Move newMove = new TimedMove((TimedMove)mv);
-                    //newList.Add(newMove);
                 }
                 PrintRow(writeToFile, columns);
                 node = node.Next;
@@ -576,7 +488,7 @@ namespace CPF_experiment
         public bool Replan(int agentForReplan, int depthToReplan, List<AgentState> subGroup = null, int maxPlanSize = -1, int minCost = -1)
         {
             ProblemInstance problem = this.cbs.GetProblemInstance();
-            Dictionary_U<TimedMove, int> CAT = (Dictionary_U<TimedMove, int>)problem.parameters[CBS_LocalConflicts.CAT];
+            Dictionary_U<TimedMove, int> CAT = (Dictionary_U<TimedMove, int>)problem.parameters[CBS.CAT];
 
             ConflictAvoidanceTable internalCAT = null; // To quiet the compiler
             int groupNum = this.agentsGroupAssignment[agentForReplan];
@@ -601,15 +513,7 @@ namespace CPF_experiment
                 CAT.Join(internalCAT);
             }
             HashSet<CbsConstraint> newConstraints = this.GetConstraints();
-            var constraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.CONSTRAINTS];
-
-            HashSet_U<CbsConstraint> mustConstraints = null;
-            HashSet<CbsConstraint> newMustConstraints = null;
-            if (problem.parameters.ContainsKey(CBS_LocalConflicts.MUST_CONSTRAINTS))
-            {
-                mustConstraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.MUST_CONSTRAINTS];
-                newMustConstraints = this.GetMustConstraints();
-            }
+            var constraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS.CONSTRAINTS];
             
             this.replanSize = (ushort)subGroup.Count;
 
@@ -620,8 +524,7 @@ namespace CPF_experiment
             ProblemInstance subProblem = problem.Subproblem(subGroup.ToArray());
 
             constraints.Join(newConstraints);
-            if (mustConstraints != null)
-                mustConstraints.Join(newMustConstraints);
+            
 
             Dictionary<int, int> subGroupAgentNums = subGroup.Select<AgentState, int>(state => state.agent.agentNum).ToDictionary<int, int>(num => num); // No need to call Distinct(). Each agent appears at most once
             IEnumerable<CbsConstraint> myConstraints = constraints.Where<CbsConstraint>(constraint => subGroupAgentNums.ContainsKey(constraint.agentNum)); // TODO: Consider passing only myConstraints to the low level to speed things up.
@@ -630,72 +533,12 @@ namespace CPF_experiment
                 int maxConstraintTimeStep = myConstraints.Max<CbsConstraint>(constraint => constraint.time);
                 depthToReplan = Math.Max(depthToReplan, maxConstraintTimeStep); // Give all constraints a chance to affect the plan
             }
-            if (mustConstraints != null)
-            {
-                IEnumerable<CbsConstraint> myMustConstraints = mustConstraints.Where<CbsConstraint>(constraint => subGroupAgentNums.ContainsKey(constraint.agentNum));
-                if (myMustConstraints.Count<CbsConstraint>() != 0)
-                {
-                    int maxMustConstraintTimeStep = myMustConstraints.Max<CbsConstraint>(constraint => constraint.time);
-                    depthToReplan = Math.Max(depthToReplan, maxMustConstraintTimeStep); // Give all must constraints a chance to affect the plan
-                }
-            }
-            
 
-            /*
-            Stopwatch stopwatch = new Stopwatch();
-            stopwatch.Start();
-            */
-
+           
             relevantSolver.Setup(subProblem, depthToReplan, this.cbs.runner, minCost);
             bool solved = relevantSolver.Solve();
-            /*
-            stopwatch.Stop();
-            */
-/*
-            string pathDesktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-            string filePath = pathDesktop + "\\mycsvfile.csv";
+            
 
-            if (!File.Exists(filePath))
-            {
-                File.Create(filePath).Close();
-            }
-            string delimter = ",";
-            List<string[]> output = new List<string[]>();
-            string[] temps = new string[subProblem.m_vAgents.Length + 2];
-
-            temps[0] = subProblem.m_vAgents.Length.ToString();
-            temps[1] = stopwatch.Elapsed.TotalMilliseconds.ToString();
-            //output.Add(new string[] { subProblem.m_vAgents.Length.ToString() });
-            //output.Add(new string[] { stopwatch.Elapsed.TotalMilliseconds.ToString() });
-
-            string agents = "";
-            for (int o = 0; o < subProblem.m_vAgents.Length; o++)
-            {
-                agents += subGroup[o].agent.agentNum.ToString();
-                if (o < subProblem.m_vAgents.Length - 1)
-                    agents += ",";
-               // int ag_g = subGroup[o].;
-                //int ag_h = subGroup[o].h;
-                //flexible part ... add as many object as you want based on your app logic
-                // output.Add(new string[] { "subGroup[o].agent.agentNum.ToString()" });
-                temps[o + 2] = subGroup[o].agent.agentNum.ToString();
-                //temps[o * 3 + 3] = "g = " + ag_g.ToString();
-                //temps[o * 3 + 4] = "h = " + ag_h.ToString();
-            }
-            output.Add(temps);
-          //  Debug.WriteLine("#Agents:" + subProblem.m_vAgents.Length + "; {" + agents + "}");
-          //  Debug.WriteLine("Time elapsed: {0}", stopwatch.Elapsed);
-
-            int length = output.Count;
-            using (System.IO.TextWriter writer = File.AppendText(filePath))
-            {
-                for (int index = 0; index < length; index++)
-                {
-                    writer.WriteLine(string.Join(delimter, output[index]));
-                }
-            }
-
-*/
             relevantSolver.AccumulateStatistics();
             relevantSolver.ClearStatistics();
 
@@ -704,8 +547,7 @@ namespace CPF_experiment
                 if (underSolve == false)
                     CAT.Separate(internalCAT); // Code dup, but if solved the CAT is needed for a bit longer.
                 constraints.Separate(newConstraints);
-                if (mustConstraints != null)
-                    mustConstraints.Separate(newMustConstraints);
+
                 return false;
             }
 
@@ -714,8 +556,6 @@ namespace CPF_experiment
             int[] singleCosts = relevantSolver.GetSingleCosts();
             Dictionary<int, int> perAgent = relevantSolver.GetExternalConflictCounts();
             Dictionary<int, List<int>> conflictTimes = relevantSolver.GetConflictTimes();
-            Dictionary<int, List<int>> conflictTimesBias = relevantSolver.GetConflictTimesBias();
-            Dictionary<int, List<double>> conflictProbability = relevantSolver.GetConflictProbability(); // to imp!!!!!
             
             for (int i = 0; i < subGroup.Count; i++)
             {
@@ -736,8 +576,6 @@ namespace CPF_experiment
                                 {
                                     perAgent[conflictAgent]++;
                                     conflictTimes[conflictAgent].Add(0);
-                                    conflictTimesBias[conflictAgent].Add(conflictTimesBiasPerAgent[agentIndex][conflictAgent][timeIndex]);
-                                    conflictProbability[conflictAgent].Add(conflictProbabilityPerAgent[agentIndex][conflictAgent][timeIndex]);
                                     
                                 }
                                 else
@@ -745,20 +583,12 @@ namespace CPF_experiment
                                     perAgent.Add(conflictAgent, 1);
                                     List<int> newTimeList = new List<int>();
                                     newTimeList.Add(0);
-                                    List<int> newTimeBiasList = new List<int>();
-                                    List<double> newProbabilityList = new List<double>();
-                                    newTimeBiasList.Add(conflictTimesBiasPerAgent[agentIndex][conflictAgent][timeIndex]);
-                                    newProbabilityList.Add(conflictProbabilityPerAgent[agentIndex][conflictAgent][timeIndex]);
                                     conflictTimes.Add(conflictAgent, newTimeList);
-                                    conflictTimesBias.Add(conflictAgent, newTimeBiasList);
-                                    conflictProbability.Add(conflictAgent, newProbabilityList);
                                 }
                             }
                         }
                     this.conflictCountsPerAgent[agentIndex] = perAgent;
                     this.conflictTimesPerAgent[agentIndex] = conflictTimes;
-                    this.conflictTimesBiasPerAgent[agentIndex] = conflictTimesBias;
-                    this.conflictProbabilityPerAgent[agentIndex] = conflictProbability;
                 }
                 else
                 {
@@ -766,15 +596,11 @@ namespace CPF_experiment
                     {
                         this.conflictCountsPerAgent[agentIndex].Clear(); // Don't over-count. Leave it to the group's representative.
                         this.conflictTimesPerAgent[agentIndex].Clear();
-                        this.conflictTimesBiasPerAgent[agentIndex].Clear();
-                        this.conflictProbabilityPerAgent[agentIndex].Clear();
                     }
                     else
                     {
                         this.conflictCountsPerAgent[agentIndex] = new Dictionary<int, int>();
                         this.conflictTimesPerAgent[agentIndex] = new Dictionary<int, List<int>>();
-                        this.conflictTimesBiasPerAgent[agentIndex] = new Dictionary<int, List<int>>();
-                        this.conflictProbabilityPerAgent[agentIndex] = new Dictionary<int, List<double>>();
                     }
                 }
             }
@@ -797,24 +623,16 @@ namespace CPF_experiment
                     {
                         this.conflictCountsPerAgent[i][representativeAgentNum] = perAgent[agentNum];
                         this.conflictTimesPerAgent[i][representativeAgentNum] = new List<int>();
-                        this.conflictTimesBiasPerAgent[i][representativeAgentNum] = new List<int>();
-                        this.conflictProbabilityPerAgent[i][representativeAgentNum] = new List<double>();
 
                         for (int time = 0; time < conflictTimes[agentNum].Count; time++)
                         {
-                            this.conflictTimesPerAgent[i][representativeAgentNum].Add(conflictTimes[agentNum][time] + conflictTimesBias[agentNum][time]);
-                            //this.conflictTimesPerAgent[i][representativeAgentNum][time] += conflictTimesBias[agentNum][time];
-                            this.conflictTimesBiasPerAgent[i][representativeAgentNum].Add(conflictTimesBias[agentNum][time] * -1);
-                            //this.conflictTimesBiasPerAgent[i][representativeAgentNum][time] *= -1;
-                            this.conflictProbabilityPerAgent[i][representativeAgentNum].Add(conflictProbability[agentNum][time]);
+                            this.conflictTimesPerAgent[i][representativeAgentNum].Add(conflictTimes[agentNum][time]);
                         }
                     }
                     else
                     {
                         this.conflictCountsPerAgent[i].Remove(representativeAgentNum);
                         this.conflictTimesPerAgent[i].Remove(representativeAgentNum);
-                        this.conflictTimesBiasPerAgent[i].Remove(representativeAgentNum);
-                        this.conflictProbabilityPerAgent[i].Remove(representativeAgentNum);
                     }
 			    }
 
@@ -824,56 +642,15 @@ namespace CPF_experiment
             }
 
             constraints.Separate(newConstraints);
-            if (mustConstraints != null)
-                mustConstraints.Separate(newMustConstraints);
 
             // Calc totalCost
             this.totalCost = (ushort) Math.Max(this.allSingleAgentCosts.Sum(), this.totalCost); // Conserve totalCost from partial expansion if it's higher (only happens when shuffling a partially expanded node)
-            if (getConflictRange() == -1)
-            {
-                if (this.isPRobustGoal())
-                    this.isGoal = this.cbs.runner.isGoalEmpirically(problem, solver, PRobustBound, singleAgentPathsToList(allSingleAgentPlans));
-            }
-            else
-                this.isGoal = this.countsOfInternalAgentsThatConflict.All(i => i == 0);
 
+            this.isGoal = this.countsOfInternalAgentsThatConflict.All(i => i == 0);
             return true;
         }
 
-        public static double PRobustBound;
-
-        private bool isPRobustGoal()
-        {
-            //double PRobustBound = 0.97;
-            List<double> probList = new List<double>();
-            List<Tuple<int, int>> agents = new List<Tuple<int, int>>(); //to prevent doubles
-            for (int agent = 0; agent < conflictProbabilityPerAgent.Count(); agent++)
-            {
-                Dictionary<int, List<double>> currentDicList = conflictProbabilityPerAgent[agent];
-                foreach(int secAgent in currentDicList.Keys)
-                {
-                    Tuple<int, int> tuple1 = new Tuple<int,int>(agent, secAgent);
-                    Tuple<int, int> tuple2 = new Tuple<int,int>(secAgent, agent);
-                    if (agents.Contains(tuple1) || agents.Contains(tuple2))
-                        continue;
-                    else
-                        agents.Add(tuple1);
-                    List<double> currentList = currentDicList[secAgent];
-                    foreach(double prob in currentList)
-                    {
-                        probList.Add(prob);
-                    }
-                }
-            }
-            double result = 1;
-            foreach(double prob in probList)
-            {
-                result *= (1 - prob);
-            }
-            //Console.WriteLine("Prob: " + result);
-            pRobustNoCollisionProb = result;
-            return result > PRobustBound;
-        }
+       
 
         public void Print()
         {
@@ -896,14 +673,8 @@ namespace CPF_experiment
             {
                 Debug.WriteLine(constraint);
             }
-            ISet<CbsConstraint> mustConstraints = this.GetMustConstraints(); // TODO: Ordered
-            Debug.WriteLine(mustConstraints.Count.ToString() + " relevant internal must constraints so far: ");
-            foreach (CbsConstraint mustConstraint in mustConstraints)
-            {
-                Debug.WriteLine(mustConstraint);
-            }
             ProblemInstance problem = this.cbs.GetProblemInstance();
-            var externalConstraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.CONSTRAINTS];
+            var externalConstraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS.CONSTRAINTS];
             Debug.WriteLine(externalConstraints.Count.ToString() + " external constraints: ");
             foreach (CbsConstraint constraint in externalConstraints)
             {
@@ -954,31 +725,7 @@ namespace CPF_experiment
 
                 }
             }
-            for (int j = 0; j < this.conflictTimesBiasPerAgent.Length; j++)
-            {
-                //if (this.conflictCountsPerAgent[j].Count != 0)
-                {
-                    Debug.Write("Agent " + problem.m_vAgents[j].agent.agentNum + " conflict times: ");
-                    foreach (var pair in this.conflictTimesBiasPerAgent[j])
-                    {
-                        Debug.Write(pair.Key.ToString() + ":[" + String.Join(",", pair.Value) + "], ");
-                    }
-                    Debug.WriteLine("");
-
-                }
-            }
-            if (this.cbs.GetType() == typeof(CBS_GlobalConflicts) && this.cbs.mergeThreshold != -1)
-            {
-                for (int i = 0; i < ((CBS_GlobalConflicts)this.cbs).globalConflictsCounter.Length; i++)
-			    {
-                    Debug.Write("Agent " + i.ToString() + " global historic conflict counts: ");
-                    for (int j = 0; j < i; j++)
-                    {
-                        Debug.Write("a" + j.ToString() + ":" + ((CBS_GlobalConflicts)this.cbs).globalConflictsCounter[i][j] + " ");
-                    }
-                    Debug.WriteLine("");
-			    }
-            }
+           
             var plan = this.CalculateJointPlan();
             if (plan.GetSize() < 200)
                 plan.PrintPlan();
@@ -1003,19 +750,9 @@ namespace CPF_experiment
             for (int time = allSingleAgentPlans[agentIndex].GetSize(); time < maxPlanSize; time++)
             {
                 afterGoal.time = time;
-                int timeWithoutDelays = 0;
-                for (int tempTime = 0; tempTime < time; tempTime++ )
-                {
-                    if (allSingleAgentPlans[agentIndex].locationAtTimes.Count > tempTime && 
-                        allSingleAgentPlans[agentIndex].locationAtTimes[tempTime].direction != Move.Direction.Wait &&
-                        allSingleAgentPlans[agentIndex].locationAtTimes[tempTime].direction != Move.Direction.NO_DIRECTION)
-                        timeWithoutDelays++;
-                }
                 afterGoal.UpdateConflictCounts(CAT,
                                                 this.conflictCountsPerAgent[this.agentsGroupAssignment[agentIndex]],
-                                                this.conflictTimesPerAgent[this.agentsGroupAssignment[agentIndex]],
-                                                this.conflictTimesBiasPerAgent[this.agentsGroupAssignment[agentIndex]],
-                                                this.conflictProbabilityPerAgent[this.agentsGroupAssignment[agentIndex]], cbs.conflictRange, timeWithoutDelays);
+                                                this.conflictTimesPerAgent[this.agentsGroupAssignment[agentIndex]]);
             }
         }
 
@@ -1042,74 +779,31 @@ namespace CPF_experiment
         /// </summary>
         protected void CalcMinOpsToSolve()
         {
-            if (this.cbs.tieBreakForMoreConflictsOnly == false)
+            var vertexCover = new HashSet<int>();
+
+            for (int i = 0; i < this.conflictCountsPerAgent.Length; i++)
             {
-                var vertexCover = new HashSet<int>();
+                if (vertexCover.Contains(i)) // This node is already in the cover - all its edges are already covered.
+                    continue;
 
-                for (int i = 0; i < this.conflictCountsPerAgent.Length; i++)
+                foreach (KeyValuePair<int, int> otherEndAgentNumAndCount in this.conflictCountsPerAgent[i])
                 {
-                    if (vertexCover.Contains(i)) // This node is already in the cover - all its edges are already covered.
-                        continue;
-
-                    foreach (KeyValuePair<int, int> otherEndAgentNumAndCount in this.conflictCountsPerAgent[i])
+                    if (this.agentNumToIndex.ContainsKey(otherEndAgentNumAndCount.Key)) // It's an internal conflict
                     {
-                        if (this.agentNumToIndex.ContainsKey(otherEndAgentNumAndCount.Key)) // It's an internal conflict
+                        int otherEndIndex = this.agentNumToIndex[otherEndAgentNumAndCount.Key];
+                        if (vertexCover.Contains(otherEndAgentNumAndCount.Key) == false) // The vertex isn't covered from its other end yet
                         {
-                            int otherEndIndex = this.agentNumToIndex[otherEndAgentNumAndCount.Key];
-                            if (vertexCover.Contains(otherEndAgentNumAndCount.Key) == false) // The vertex isn't covered from its other end yet
-                            {
-                                vertexCover.Add(i);
-                                vertexCover.Add(otherEndIndex);
-                                break; // All of this node's edges are now covered.
-                            }
+                            vertexCover.Add(i);
+                            vertexCover.Add(otherEndIndex);
+                            break; // All of this node's edges are now covered.
                         }
                     }
                 }
-
-                int minReplansToSolve = (int)Math.Ceiling(((double)vertexCover.Count) / 2); // We have a 2-approximation of the cover -
-                // half that is at least half the value we're trying to approximate.
-                //if (this.cbs.debug)
-                //    Debug.WriteLine("min replans lower estimate: " + minReplansToSolve);
-                if (this.cbs.mergeThreshold != -1) // Merges possible, account for them
-                {
-                    if (this.cbs.GetType() == typeof(CBS_LocalConflicts))
-                    {
-                        if (this.cbs.mergeThreshold > 0)
-                        {
-                            int maxPotentialMergeSavings = (int)Math.Floor(((double)minReplansToSolve) / 2);
-                            int depthToGoTo = this.depth + minReplansToSolve;
-                            int chainSize = this.cbs.mergeThreshold + 1; // Every series of B+1 downwards consecutive nodes may end with a merge.
-                            int maxMerges = depthToGoTo / chainSize; // Round down to discount the last unfinished chain.
-
-                            // Count the minimum amount of merges already done and substract it from maxMerges:
-                            var groupSizes = new Dictionary<int, int>();
-                            for (int i = 0; i < this.agentsGroupAssignment.Length; i++)
-                            {
-                                if (groupSizes.ContainsKey(this.agentsGroupAssignment[i]) == false)
-                                    groupSizes[this.agentsGroupAssignment[i]] = 0;
-                                groupSizes[this.agentsGroupAssignment[i]]++;
-                            }
-                            // Not using this.GetGroupSizes() because what we want is actually
-                            // a list of the sizes of the different groups, not the size of each agent's group
-
-                            foreach (int groupSize in groupSizes.Values)
-                                maxMerges -= (int)Math.Ceiling(Math.Log(groupSize, 2)); // A group of size 1 has had zero merges, a group of size 2 has had 1, larger groups have had at least log2 their size merges.
-
-                            int maxMergeSavings = Math.Min(maxPotentialMergeSavings, maxMerges);
-
-                            this.minOpsToSolve = minReplansToSolve - maxMergeSavings;
-
-
-                        }
-                        else
-                            this.minOpsToSolve = (int)Math.Ceiling(((double)minReplansToSolve) / 2);
-                    }
-                    else
-                        this.minOpsToSolve = (int)Math.Ceiling(((double)minReplansToSolve) / 2); // TODO: We could look and the global table and maybe deduce something, but I'm not interested in that right now.
-                }
-                else
-                    this.minOpsToSolve = (int)minReplansToSolve;
             }
+
+            int minReplansToSolve = (int)Math.Ceiling(((double)vertexCover.Count) / 2); // We have a 2-approximation of the cover -
+           
+            this.minOpsToSolve = (int)minReplansToSolve;
         }
 
         protected void CountConflicts()
@@ -1139,8 +833,6 @@ namespace CPF_experiment
                         externalConflictingAgentNums.Add(conflictingAgentNumAndCount.Key);
                         this.totalConflictsWithExternalAgents += conflictingAgentNumAndCount.Value;
                         this.conflictTimesPerAgent[i].Remove(conflictingAgentNumAndCount.Key); // Not needed
-                        this.conflictTimesBiasPerAgent[i].Remove(conflictingAgentNumAndCount.Key); // Not needed
-                        this.conflictProbabilityPerAgent[i].Remove(conflictingAgentNumAndCount.Key); // Not needed
                     }
                 }
             }
@@ -1172,7 +864,6 @@ namespace CPF_experiment
         public void ClearConflictChoiceData()
         {
             this.nextConflicts = null;
-            this.mdds = null;
         }
 
         /// Returns whether another conflict was found
@@ -1203,413 +894,13 @@ namespace CPF_experiment
             int groupRepB = -1;
             int time = int.MaxValue;
             int time2;
-            if (this.cbs.conflictChoice == CBS_LocalConflicts.ConflictChoice.FIRST)
-            {
-                ChooseFirstConflict(out groupRepA, out groupRepB, out time, out time2);
-                this.conflict = FindConflict(groupRepA, groupRepB, time, null, time2);
-            }
-            else if (this.cbs.conflictChoice == CBS_LocalConflicts.ConflictChoice.MOST_CONFLICTING)
-            {
-                ChooseBestConflict(out groupRepA, out groupRepB, out time);
-                this.conflict = FindConflict(groupRepA, groupRepB, time);
-            }
-            else if (this.cbs.conflictChoice == CBS_LocalConflicts.ConflictChoice.CARDINAL_MDD)
-            {
-                this.nextConflicts = this.GetConflictsCardinalFirstUsingMdd().GetEnumerator();
-                bool hasConflict = this.nextConflicts.MoveNext(); // This node isn't a goal node so this is expected to return true - a conflict should be found
-                Debug.Assert(hasConflict, "Non-goal node found no conflict");
-                this.conflict = this.nextConflicts.Current;
-            }
-            else if (this.cbs.conflictChoice == CBS_LocalConflicts.ConflictChoice.CARDINAL_LOOKAHEAD)
-            {
-                this.nextConflicts = this.GetConflictsNoOrder().GetEnumerator();
-                bool hasConflict = this.nextConflicts.MoveNext(); // This node isn't a goal node so this is expected to return true - a conflict should be found
-                if (hasConflict == false)
-                {
-                    this.Print();
-                    Debug.Assert(false, "Non-goal node found no conflict");
-                }
-                this.conflict = this.nextConflicts.Current;
-            }
-            else
-                throw new Exception("Unknown conflict choosing method");
+
+            ChooseFirstConflict(out groupRepA, out groupRepB, out time, out time2);
+            this.conflict = FindConflict(groupRepA, groupRepB, time, null, time2);
         }
 
-        ///// <summary>
-        ///// Chooses an internal conflict to work on.
-        ///// </summary>
-        //public void ChooseConflict()
-        //{
-        //    if (this.allSingleAgentPlans.Length == 1) // A single internal agent can't conflict with anything internally
-        //        return;
+       
 
-        //    if (this.isGoal) // Goal nodes don't have conflicts
-        //        return;
-
-        //    if (this.conflict != null) // Conflict already chosen before
-        //        return;
-
-        //    this.conflict = null;
-        //    int groupRepA = -1;
-        //    int groupRepB = -1;
-        //    int time = int.MaxValue;
-
-        //    if (this.cbs.conflictChoice == CBS_LocalConflicts.ConflictChoice.FIRST)
-        //        ChooseFirstConflict(out groupRepA, out groupRepB, out time);
-        //    else if (this.cbs.conflictChoice == CBS_LocalConflicts.ConflictChoice.MOST_CONFLICTING)
-        //        ChooseBestConflict(out groupRepA, out groupRepB, out time);
-        //    else if (this.cbs.conflictChoice == CBS_LocalConflicts.ConflictChoice.CARDINAL_MDD)
-        //        ChooseCardinalConflict(out groupRepA, out groupRepB, out time);
-        //    else
-        //        throw new Exception("Unknown conflict choosing method");
-
-        //    this.conflict = FindConflict(groupRepA, groupRepB, time);
-        //}
-
-        ///// <summary>
-        ///// Returns a cardinal conflict where both agents have MDDs built already.
-        ///// Remember conflicts for agents whose MDD was built during the iteration might not be returned here.
-        ///// </summary>
-        ///// <returns></returns>
-        //private CbsConflict GetExistingMddCardinalConflict()
-        //{
-        //    for (int i = 0; i < this.problem.m_vAgents.Length; i++)
-        //    {
-        //        if (this.mdds[i] == null)
-        //            continue;
-
-        //        foreach (int conflictingAgentNum in this.conflictTimesPerAgent[i].Keys)
-        //        {
-        //            int conflictingAgentIndex = this.agentNumToIndex[conflictingAgentNum];
-        //            if (this.mdds[conflictingAgentIndex] == null)
-        //                continue;
-
-        //            foreach (int conflictTime in this.conflictTimesPerAgent[i][conflictingAgentNum])
-        //            {
-        //                bool iNarrow = conflictTime >= this.mdds[i].levels.Length || // At goal conflict
-        //                                this.mdds[i].levels[conflictTime].Count == 1;
-        //                if (iNarrow == false)
-        //                    continue;
-
-        //                bool otherNarrow = conflictTime >= this.mdds[conflictingAgentIndex].levels.Length ||
-        //                                this.mdds[conflictingAgentIndex].levels[conflictTime].Count == 1;
-        //                if (otherNarrow == false)
-        //                    continue;
-                        
-        //                // We only build MDDs for single-agent agent groups so we don't need to look for the 
-        //                // specific agents that conflict
-        //                Move first = this.allSingleAgentPlans[i].GetLocationAt(conflictTime);
-        //                Move second = this.allSingleAgentPlans[conflictingAgentIndex].GetLocationAt(conflictTime);
-        //                return new CbsConflict(i, conflictingAgentIndex, first, second, conflictTime);
-        //            }
-        //        }
-        //    }
-            
-        //    return null;
-        //}
-
-        /// <summary>
-        /// No special ordering.
-        /// </summary>
-        /// <returns></returns>
-        private IEnumerable<CbsConflict> GetConflictsNoOrder()
-        {
-            ISet<int>[] groups = this.GetGroups();
-            this.nextConflictCouldBeCardinal = true; // We don't know
-
-            for (int i = 0; i < this.conflictTimesPerAgent.Length; i++)
-            {
-                foreach (int conflictingAgentNum in this.conflictTimesPerAgent[i].Keys)
-                {
-                    int conflictingAgentIndex = this.agentNumToIndex[conflictingAgentNum];
-                    if (conflictingAgentIndex < i)
-                        continue; // Return each conflict only once
-
-                    foreach (int conflictTime in this.conflictTimesPerAgent[i][conflictingAgentNum])
-                    {
-                        yield return FindConflict(i, conflictingAgentIndex, conflictTime, groups);
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// CBS may use this to decide whether to give up the current conflict and check the next one.
-        /// </summary>
-        public bool nextConflictCouldBeCardinal = false;
-
-        /// <summary>
-        /// Returns all conflicts, cardinal first, then possibly cardinal, then semi cardinal,
-        /// then possibly semi cardinal, and finally non-cardinal, building MDDs as necessary.
-        /// Trying to build MDDs as late as possible.
-        /// 
-        /// TODO: Consider turning all queues into priority queues that prefer smaller agents, smaller degree etc.
-        /// TODO: Find a better data strcture to support faster deletion from queues.
-        /// </summary>
-        /// <returns></returns>
-        private IEnumerable<CbsConflict> GetConflictsCardinalFirstUsingMdd()
-        {
-            if (this.totalConflictsBetweenInternalAgents == 1)
-            {
-                if (this.cbs.debug)
-                    Debug.WriteLine("Single conflict. Just choosing it.");
-                return GetConflictsNoOrder();
-            }
-            return GetConflictsCardinalFirstUsingMddInternal();
-        }
-
-        private IEnumerable<CbsConflict> GetConflictsCardinalFirstUsingMddInternal()
-        {
-            ISet<int>[] groups = this.GetGroups();
-            // Queue items are <first agent index, second agent index, time>
-            Queue<Tuple<int, int, int>> NotCardinalMaybeSemi = new Queue<Tuple<int, int, int>>(); // Because first has an MDD
-            Queue<Tuple<int, int, int>> NotCardinalNotSemi = new Queue<Tuple<int, int, int>>();
-            Queue<Tuple<int, int, int>> SemiCardinal = new Queue<Tuple<int, int, int>>();
-            Queue<Tuple<int, int, int>> PossiblyCardinalFirstHasMddSecondDoesNotButCan = new Queue<Tuple<int, int, int>>();
-            Queue<Tuple<int, int, int>> PossiblyCardinalFirstHasMddSecondCannot = new Queue<Tuple<int, int, int>>();
-            Queue<Tuple<int, int, int>> PossiblyCardinalBothCannotBuildMdd = new Queue<Tuple<int, int, int>>();
-            Queue<Tuple<int, int, int>> PossiblyCardinalFirstCanBuildMdd = new Queue<Tuple<int, int, int>>(); // Going over these just get the first element, build its MDD and 
-            Queue<int> ToCheck = new Queue<int>(Enumerable.Range(0, this.allSingleAgentPlans.Length));
-            // Positively cardinal conflicts are just yielded immediately
-            // Edges are only entered to a queue once, not once for each end. Only if the conflicting agent with the larger index
-            // can have an MDD built and the one with the lower can't, an edge is entered in reverse.
-
-            bool checkAnyway = false; // Needed when rechecking agents to signal that we shouldn't 
-                                      // rely on the other end to check a conflict
-
-            // Incrementally scan conflicts and build MDDs
-            while (true)
-            {
-                // 1. Go over ToCheck, sorting conflicts into queues and yielding cardinal conflicts as necessary,
-                // but not building new MDDs.
-                while (ToCheck.Count != 0)
-                {
-                    int i = ToCheck.Dequeue();
-                    bool hasMDD = this.mdds[i] != null && this.mdds[i].levels != null;
-                    bool canBuildMDD = groups[i].Count == 1 && this.mdds[i] == null; // If building the MDD failed once mark it as unbuildable
-
-                    foreach (int conflictingAgentNum in this.conflictTimesPerAgent[i].Keys)
-                    {
-                        int conflictingAgentIndex = this.agentNumToIndex[conflictingAgentNum];
-                        bool otherHasMDD = this.mdds[conflictingAgentIndex] != null && this.mdds[conflictingAgentIndex].levels != null;
-                        bool otherCanBuildMdd = groups[conflictingAgentIndex].Count == 1 && this.mdds[conflictingAgentIndex] == null;
-
-                        if (otherCanBuildMdd && (checkAnyway == false))
-                        {
-                            if ((conflictingAgentIndex < i) || (canBuildMDD == false))
-                                continue; // We'll take care of this conflict from the other end
-                        }
-
-                        // Reaching here means either i < conflictingAgentIndex,
-                        // or the i'th agent can build an MDD and the conflictingAgentIndex'th can't.
-                        foreach (int conflictTime in this.conflictTimesPerAgent[i][conflictingAgentNum])
-                        {
-                            if (hasMDD) // Check if not cardinal
-                            {
-                                bool iNarrow = conflictTime >= this.mdds[i].levels.Length || // At goal conflict
-                                                this.mdds[i].levels[conflictTime].Count == 1;
-                                if (iNarrow == false) // Then it isn't cardinal. May still be semi cardinal.
-                                {
-                                    if (otherHasMDD == false) // Skip building the second MDD even if it's possible
-                                    {
-                                        NotCardinalMaybeSemi.Enqueue(new Tuple<int, int, int>(i, conflictingAgentIndex, conflictTime));
-                                        continue;
-                                    }
-                                    else // Other has MDD
-                                    {
-                                        bool otherNarrow = conflictTime >= this.mdds[conflictingAgentIndex].levels.Length ||
-                                                        this.mdds[conflictingAgentIndex].levels[conflictTime].Count == 1;
-                                        if (otherNarrow == false)
-                                        {
-                                            NotCardinalNotSemi.Enqueue(new Tuple<int, int, int>(i, conflictingAgentIndex, conflictTime));
-                                            continue;
-                                        }
-                                        else // Other narrow but i not narrow at the time of the conflict
-                                        {
-                                            SemiCardinal.Enqueue(new Tuple<int, int, int>(i, conflictingAgentIndex, conflictTime));
-                                            continue;
-                                        }
-                                    }
-                                }
-                                else // iNarrow
-                                {
-                                    if (otherHasMDD == false)
-                                    {
-                                        if (otherCanBuildMdd)
-                                        {
-                                            PossiblyCardinalFirstHasMddSecondDoesNotButCan.Enqueue(new Tuple<int, int, int>(i, conflictingAgentIndex, conflictTime));
-                                            continue;
-                                        }
-                                        else // iNarrow, other cannot build an MDD
-                                        {
-                                            PossiblyCardinalFirstHasMddSecondCannot.Enqueue(new Tuple<int, int, int>(i, conflictingAgentIndex, conflictTime));
-                                            continue;
-                                        }
-                                    }
-                                    else // Other has MDD
-                                    {
-                                        bool otherNarrow = conflictTime >= this.mdds[conflictingAgentIndex].levels.Length ||
-                                                        this.mdds[conflictingAgentIndex].levels[conflictTime].Count == 1;
-                                        if (otherNarrow == false) // iNarrow but other not narrow
-                                        {
-                                            SemiCardinal.Enqueue(new Tuple<int, int, int>(i, conflictingAgentIndex, conflictTime));
-                                            continue;
-                                        }
-                                        else // Both narrow!
-                                        {
-                                            if (this.cbs.debug)
-                                                Debug.WriteLine("Cardinal conflict chosen.");
-                                            CbsConflict cardinal = FindConflict(i, conflictingAgentIndex, conflictTime, groups);
-                                            if (this.h < 1) // The children's cost will be at least 1 more than this node's cost
-                                                this.h = 1;
-                                            // No need to set this.nextConflictCouldBeCardinal to true. A cardinal conflict has already been found.
-                                            yield return cardinal;
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
-                            else // No MDD
-                            {
-                                if (canBuildMDD)
-                                {
-                                    PossiblyCardinalFirstCanBuildMdd.Enqueue(new Tuple<int, int, int>(i, conflictingAgentIndex, conflictTime));
-                                    continue;
-                                }
-                                else // No MDD and can't build one and other can't build one either (already checked for the latter case above)
-                                     // When re-checking an agent's conflicts we'll never get here because we only recheck agents that can build an MDD
-                                {
-                                    PossiblyCardinalBothCannotBuildMdd.Enqueue(new Tuple<int, int, int>(i, conflictingAgentIndex, conflictTime));
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                checkAnyway = true;
-
-                // 2.
-                if (PossiblyCardinalFirstHasMddSecondDoesNotButCan.Count != 0)
-                {
-                    //   a. Get one conflict from PossiblyCardinalFirstHasMddSecondDoesNotButCan and build the second agent's
-                    // MDD.
-                    int agentToBuildAnMddFor = PossiblyCardinalFirstHasMddSecondDoesNotButCan.Dequeue().Item2;
-                    this.buildMddForAgent(agentToBuildAnMddFor);
-                    //   b. Remove other conflicts from PossiblyCardinalFirstHasMddSecondDoesNotButCan where the second
-                    //      agent is the one we built an MDD for (in all of those, the first agent's index is lower than the second's,
-                    //      since we could build an MDD for it).
-                    PossiblyCardinalFirstHasMddSecondDoesNotButCan = new Queue<Tuple<int,int,int>>(
-                            PossiblyCardinalFirstHasMddSecondDoesNotButCan.Where<Tuple<int, int, int>>(
-                                tuple => tuple.Item2 != agentToBuildAnMddFor));
-                    //   c. Remove conflicts from PossiblyCardinalFirstCanBuildMdd where  the first or second agent is the one we
-                    //      built the MDD for.
-                    PossiblyCardinalFirstCanBuildMdd = new Queue<Tuple<int, int, int>>(
-                        PossiblyCardinalFirstCanBuildMdd.Where<Tuple<int, int, int>>(tuple => (tuple.Item2 != agentToBuildAnMddFor) &&
-                                                                                              (tuple.Item1 != agentToBuildAnMddFor))
-                                                                                       );
-                    //   d. Remove conflicts from NotCardinalMaybeSemi where the first or second agent is the one we
-                    //      built the MDD for
-                    NotCardinalMaybeSemi = new Queue<Tuple<int, int, int>>(
-                        NotCardinalMaybeSemi.Where<Tuple<int, int, int>>(tuple => tuple.Item2 != agentToBuildAnMddFor));
-                    //   e. No need to check for the agent's conflicts in PossiblyCardinalFirstHasMddSecondCannot,
-                    //      PossiblyCardinalBothCannotBuildMdd, NotCardinalNotSemi, SemiCardinal
-                    //   f. Enter the agent into ToCheck. 
-                    ToCheck.Enqueue(agentToBuildAnMddFor);
-                    continue;
-                }
-
-                // 3.
-                if (PossiblyCardinalFirstCanBuildMdd.Count != 0)
-                {
-                    //   a. Get one conflict from PossiblyCardinalFirstCanBuildMdd and build the first agent's
-                    // MDD.
-                    int agentToBuildAnMddFor = PossiblyCardinalFirstCanBuildMdd.Dequeue().Item1;
-                    this.buildMddForAgent(agentToBuildAnMddFor);
-                    //   b. Remove other conflicts from PossiblyCardinalFirstHasMddSecondDoesNotButCan where the second
-                    //      agent is the one we built an MDD for (in all of those, the first agent's index is lower than the second's,
-                    //      since we could build an MDD for it).
-                    PossiblyCardinalFirstHasMddSecondDoesNotButCan = new Queue<Tuple<int, int, int>>(
-                            PossiblyCardinalFirstHasMddSecondDoesNotButCan.Where<Tuple<int, int, int>>(
-                                tuple => tuple.Item2 != agentToBuildAnMddFor));
-                    //   c. Remove conflicts from PossiblyCardinalFirstCanBuildMdd where  the first or second agent is the one we
-                    //      built the MDD for.
-                    PossiblyCardinalFirstCanBuildMdd = new Queue<Tuple<int, int, int>>(
-                        PossiblyCardinalFirstCanBuildMdd.Where<Tuple<int, int, int>>(tuple => (tuple.Item2 != agentToBuildAnMddFor) &&
-                                                                                              (tuple.Item1 != agentToBuildAnMddFor))
-                                                                                       );
-                    //   d. Remove conflicts from NotCardinalMaybeSemi where the first or second agent is the one we
-                    //      built the MDD for
-                    NotCardinalMaybeSemi = new Queue<Tuple<int, int, int>>(
-                        NotCardinalMaybeSemi.Where<Tuple<int, int, int>>(tuple => tuple.Item2 != agentToBuildAnMddFor));
-                    //   e. No need to check for the agent's conflicts in PossiblyCardinalFirstHasMddSecondCannot,
-                    //      PossiblyCardinalBothCannotBuildMdd, NotCardinalNotSemi, SemiCardinal
-                    //   f. Enter the agent into ToCheck. 
-                    ToCheck.Enqueue(agentToBuildAnMddFor);
-                    continue;
-                }
-                
-                break; // No more queues to loot
-            }
-
-            // Yield the possibly cardinal conflicts where we can't build an MDD for the second agent
-            while (PossiblyCardinalFirstHasMddSecondCannot.Count != 0)
-            {
-                if (this.cbs.debug)
-                    Debug.WriteLine("We'll try and see if this conflict is cardinal");
-                var tuple = PossiblyCardinalFirstHasMddSecondCannot.Dequeue();
-                this.nextConflictCouldBeCardinal = (PossiblyCardinalFirstHasMddSecondCannot.Count != 0) ||
-                                                   (PossiblyCardinalBothCannotBuildMdd.Count != 0);
-                yield return FindConflict(tuple.Item1, tuple.Item2, tuple.Item3, groups);
-            }
-
-            // Yield the possibly cardinal conflicts where we can't build an MDD for either agent
-            while (PossiblyCardinalBothCannotBuildMdd.Count != 0)
-            {
-                if (this.cbs.debug)
-                    Debug.WriteLine("We'll try and see if this conflict is cardinal");
-                var tuple = PossiblyCardinalBothCannotBuildMdd.Dequeue();
-                this.nextConflictCouldBeCardinal = PossiblyCardinalBothCannotBuildMdd.Count != 0;
-                yield return FindConflict(tuple.Item1, tuple.Item2, tuple.Item3, groups);
-            }
-
-            this.nextConflictCouldBeCardinal = false;
-
-            // Yield semi cardinal conflicts
-            while (SemiCardinal.Count != 0)
-            {
-                if (this.cbs.debug)
-                    Debug.WriteLine("Settling for a semi-cardinal conflict.");
-                var tuple = SemiCardinal.Dequeue();
-                yield return FindConflict(tuple.Item1, tuple.Item2, tuple.Item3, groups);
-            }
-
-            // Yield the non cardinal conflicts, possibly semi first
-            while (NotCardinalMaybeSemi.Count != 0)
-            {
-                if (this.cbs.debug)
-                    Debug.WriteLine("No cardinal conflict found. This one's possibly a semi cardinal conflict.");
-                var tuple = NotCardinalMaybeSemi.Dequeue();
-                yield return FindConflict(tuple.Item1, tuple.Item2, tuple.Item3, groups);
-            }
-
-            while (NotCardinalNotSemi.Count != 0)
-            {
-                if (this.cbs.debug)
-                    Debug.WriteLine("Non-cardinal conflict chosen");
-                var tuple = NotCardinalNotSemi.Dequeue();
-                yield return FindConflict(tuple.Item1, tuple.Item2, tuple.Item3, groups);
-            }
-
-            Debug.Assert(NotCardinalMaybeSemi.Count == 0);
-            Debug.Assert(NotCardinalNotSemi.Count == 0);
-            Debug.Assert(SemiCardinal.Count == 0);
-            Debug.Assert(PossiblyCardinalFirstHasMddSecondDoesNotButCan.Count == 0);
-            Debug.Assert(PossiblyCardinalFirstHasMddSecondCannot.Count == 0);
-            Debug.Assert(PossiblyCardinalBothCannotBuildMdd.Count == 0);
-            Debug.Assert(PossiblyCardinalFirstCanBuildMdd.Count == 0);
-            Debug.Assert(ToCheck.Count == 0);
-        }
 
         /// <summary>
         /// Assuming the groups conflict, return their conflict.
@@ -1648,251 +939,11 @@ namespace CPF_experiment
         private void FindConflicting(int aConflictingGroupMemberIndex, int bConflictingGroupMemberIndex, int time, out int a, out int b,
                                      ISet<int>[] groups = null)
         {
-            if (this.cbs.mergeThreshold == -1) // An optimization for CBS. We assume they collide.
-            {
-                a = aConflictingGroupMemberIndex;
-                b = bConflictingGroupMemberIndex;
-                return;
-            }
-
-            ISet<int> groupA;
-            ISet<int> groupB;
-
-            if (groups == null)
-            {
-                groupA = this.GetGroup(aConflictingGroupMemberIndex);
-                groupB = this.GetGroup(bConflictingGroupMemberIndex);
-            }
-            else
-            {
-                groupA = groups[aConflictingGroupMemberIndex];
-                groupB = groups[bConflictingGroupMemberIndex];
-            }
-            this.largerConflictingGroupSize = Math.Max(groupA.Count, groupB.Count);
-
-            if (groupA.Count == 1 && groupB.Count == 1) // We assume they collide.
-            {
-                a = aConflictingGroupMemberIndex;
-                b = bConflictingGroupMemberIndex;
-                return;
-            }
-
-            foreach (var varA in groupA)
-            {
-                foreach (var varB in groupB)
-                {
-                    if (allSingleAgentPlans[varA].IsColliding(time, allSingleAgentPlans[varB]))
-                    {
-                        a = varA;
-                        b = varB;
-                        return;
-                    }
-                }
-            }
-
-            // A conflict should have been found
-            this.Print();
-            throw new Exception("Conflict not found");
+            a = aConflictingGroupMemberIndex;
+            b = bConflictingGroupMemberIndex;
         }
 
-        private bool buildMddForAgent(int conflictingIndex)
-        {
-            if (this.mdds[conflictingIndex] == null)
-            {
-                if (this.cbs.debug)
-                    Debug.WriteLine("Building MDD for agent index " + conflictingIndex);
-
-                // TODO: Code dup with Replan, Solve
-                ProblemInstance problem = this.cbs.GetProblemInstance();
-                HashSet<CbsConstraint> newConstraints = this.GetConstraints();
-                var constraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.CONSTRAINTS];
-
-                HashSet_U<CbsConstraint> mustConstraints = null;
-                HashSet<CbsConstraint> newMustConstraints = null;
-                if (problem.parameters.ContainsKey(CBS_LocalConflicts.MUST_CONSTRAINTS))
-                {
-                    mustConstraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.MUST_CONSTRAINTS];
-                    newMustConstraints = this.GetMustConstraints();
-                }
-
-                constraints.Join(newConstraints);
-                if (mustConstraints != null)
-                    mustConstraints.Join(newMustConstraints);
-
-                int depth = this.allSingleAgentCosts.Max();
-
-                IEnumerable<CbsConstraint> myConstraints = constraints.Where<CbsConstraint>(
-                    constraint => constraint.agentNum == problem.m_vAgents[conflictingIndex].agent.agentNum);
-                if (myConstraints.Count<CbsConstraint>() != 0)
-                {
-                    int maxConstraintTimeStep = myConstraints.Max<CbsConstraint>(constraint => constraint.time);
-                    depth = Math.Max(depth, maxConstraintTimeStep); // Give all constraints a chance to affect the plan
-                }
-                if (mustConstraints != null)
-                {
-                    IEnumerable<CbsConstraint> myMustConstraints = mustConstraints.Where<CbsConstraint>(
-                        constraint => constraint.agentNum == problem.m_vAgents[conflictingIndex].agent.agentNum);
-                    if (myMustConstraints.Count<CbsConstraint>() != 0)
-                    {
-                        int maxMustConstraintTimeStep = myMustConstraints.Max<CbsConstraint>(constraint => constraint.time);
-                        depth = Math.Max(depth, maxMustConstraintTimeStep); // Give all must constraints a chance to affect the plan
-                    }
-                }
-
-                this.mdds[conflictingIndex] =
-                    new MDD(conflictingIndex, problem.m_vAgents[conflictingIndex].agent.agentNum,
-                        problem.m_vAgents[conflictingIndex].GetMove(), this.allSingleAgentCosts[conflictingIndex],
-                        depth, problem.GetNumOfAgents(), problem, false, false);
-
-                constraints.Separate(newConstraints);
-                if (mustConstraints != null)
-                    mustConstraints.Separate(newMustConstraints);
-
-                this.cbs.mddsBuilt++;
-
-                return true;
-            }
-            else
-                return false;
-        }
-
-        //private void ChooseCardinalConflict(out int groupRepA, out int groupRepB, out int time)
-        //{
-        //    groupRepA = -1; // To quiet the compiler
-        //    groupRepB = -1; // To quiet the compiler
-        //    time = int.MaxValue;
-        //    int semiCardinalTime = int.MaxValue;
-
-        //    AgentToCheckForCardinalConflicts[] agentsData = new AgentToCheckForCardinalConflicts[this.problem.m_vAgents.Length];
-        //    int[] groupSizes = this.GetGroupSizes();
-        //    for (int i = 0; i < agentsData.Length; i++)
-        //    {
-        //        agentsData[i] = new AgentToCheckForCardinalConflicts(
-        //            /*this.mdds[i] != null,
-        //            this.conflictCountsPerAgent[i].Keys.Where<int>(num => this.mdds[this.agentNumToIndex[num]] != null).Count(),*/
-        //            groupSizes[i],
-        //            -1 * this.conflictCountsPerAgent[i].Values.Sum(), // Prefer LARGER degree if former parameters are equal
-        //            this.allSingleAgentCosts[i], i);
-        //    }
-
-        //    BinaryHeap toCheck = new BinaryHeap(agentsData);
-
-        //    while (toCheck.Count != 0)
-        //    {
-        //        int i = ((AgentToCheckForCardinalConflicts) toCheck.Remove()).index;
-
-        //        if (this.cbs.debug)
-        //            Debug.WriteLine("Checking agent index " + i + " for cardinal conflicts:");
-
-        //        // TODO: CHECK CONFLICT GRAPH EDGES THAT ARE ALREADY COVERED FROM BOTH SIDES FIRST!
-
-        //        // Check agents that already have an MDD first, (among them check agents with smaller groups first,) among them check lower indices first
-        //        //int[] otherAgentIndices = this.conflictTimesPerAgent[i].Keys.Select<int, int>(num => this.agentNumToIndex[num]).ToArray<int>();
-        //        ////Array.Sort<int, int>(otherAgentIndices.Select<int, int>(index => groupSizes[index]).ToArray<int>(), otherAgentIndices);
-        //        //Array.Sort<int, int>(otherAgentIndices.Select<int, int>(index => this.mdds[index] != null ? 0 : this.allSingleAgentCosts[index]).ToArray<int>(), otherAgentIndices);
-
-        //        BinaryHeap otherAgents = new BinaryHeap(
-        //            this.conflictTimesPerAgent[i].Keys.Select<int, AgentToCheckForCardinalConflicts>(
-        //                num => agentsData[this.agentNumToIndex[num]]
-        //            ).ToList<AgentToCheckForCardinalConflicts>());
-
-        //        while (otherAgents.Count != 0)
-        //        {
-        //            int otherAgentIndex = ((AgentToCheckForCardinalConflicts) otherAgents.Remove()).index;
-        //            //if (haveMDD.Contains(otherAgentIndex) == false && dontHaveMDD.Contains(otherAgentIndex) == false)
-        //            //if (agentsData[otherAgentIndex].GetIndexInHeap() == BinaryHeap.REMOVED_FROM_HEAP)
-        //            //    continue; // Only check each pair once. If the other agent is already done then its conflicts were already done.
-
-        //            if (this.cbs.debug)
-        //                Debug.WriteLine("with agent index " + otherAgentIndex);
-
-        //            List<int> conflictTimes = this.conflictTimesPerAgent[i][otherAgentIndex];
-        //            foreach (var conflictTime in conflictTimes)
-        //            {
-        //                // For now, we don't build k-agent MDDs for meta-agents,
-        //                // so we need to find the specific agents that conflict to use their MDD
-        //                // (even if it sometimes means choosing conflicts that aren't actually cardinal,
-        //                // because an agent in a group may have a narrow level in its MDD conflict and not raise
-        //                // the total cost since the other agents in its group actually have implicit constraints
-        //                // currently forcing them not to conflict with the agent's current plan, and when we force
-        //                // the agent to replan, we're changing the implicit constraints on the other agents in its group,
-        //                // possibly allowing them to find cheaper plans (but never cheaper than the cost increase the
-        //                // agent just received, otherwise the group's current plan isn't optimal wrt its current constraints)):
-        //                int specificConflictingAgentA, specificConflictingAgentB;
-        //                this.FindConflicting(i, otherAgentIndex, conflictTime, out specificConflictingAgentA, out specificConflictingAgentB);
-
-        //                // Not pruning the MDDs to allow reusing them later, even if it means missing cardinal conflicts.
-        //                // It's also faster.
-        //                // TODO: Is this a good choice? yes. See text document in Search folder.
-
-        //                this.buildMddForAgent(specificConflictingAgentA); // Only now. This may never happen if all the agent's conflicts were already checked from the other side
-
-        //                bool iNarrow = conflictTime >= this.mdds[specificConflictingAgentA].levels.Length || // At goal conflict
-        //                                this.mdds[specificConflictingAgentA].levels[conflictTime].Count == 1;
-
-        //                if (iNarrow == false && this.mdds[specificConflictingAgentB] == null) // It isn't a cardinal conflict. Skip building the MDD for the other agent.
-        //                                                                                      // It may still be a semi-cardinal conflict, but it's too expensive to check for that now, when finding a cardinal conflict is still possible.
-        //                                                                                      // Since we do let conflict graph edges be checked twice, we'll find if this is a semi-cardinal conflict if we reach the other agent later while checking for cardinal conflicts.
-        //                {
-        //                    continue;
-        //                }
-
-        //                // Prepare the other MDD if necessary
-        //                this.buildMddForAgent(specificConflictingAgentB);
-        //                //if (dontHaveMDD.Contains(conflict.agentBIndex))
-        //                //{
-        //                //    dontHaveMDD.Remove(conflict.agentBIndex);
-        //                //    haveMDD.Add(conflict.agentBIndex);
-        //                //}
-        //                if (agentsData[specificConflictingAgentB].GetIndexInHeap() != BinaryHeap.REMOVED_FROM_HEAP &&
-        //                    agentsData[specificConflictingAgentB].hasMDD == false)
-        //                {
-        //                    toCheck.Remove(agentsData[specificConflictingAgentB]);
-        //                    agentsData[specificConflictingAgentB].hasMDD = true;
-        //                    toCheck.Add(agentsData[specificConflictingAgentB]);
-        //                }
-
-        //                bool otherNarrow = conflictTime >= this.mdds[specificConflictingAgentB].levels.Length ||
-        //                                this.mdds[specificConflictingAgentB].levels[conflictTime].Count == 1;
-
-        //                if (iNarrow && otherNarrow)
-        //                {
-        //                    // This is a cardinal conflict
-        //                    time = conflictTime;
-        //                    groupRepA = i;
-        //                    groupRepB = otherAgentIndex;
-        //                    if (this.cbs.debug)
-        //                        Debug.WriteLine("Cardinal conflict found! " + time +  " " + groupRepA + " " + groupRepB);
-        //                    if (this.h < 1) // The children's cost will be at least 1 more than this node's cost
-        //                        this.h = 1;
-        //                    return;
-        //                }
-        //                else if (iNarrow || otherNarrow) // but not both
-        //                {
-        //                    // This is a semi-cardinal conflict
-        //                    semiCardinalTime = conflictTime;
-        //                    groupRepA = i;
-        //                    groupRepB = otherAgentIndex;
-        //                }
-        //            }
-        //        }
-        //    }
-
-        //    // No cardinal conflict found
-        //    if (semiCardinalTime != int.MaxValue)
-        //    {
-        //        time = semiCardinalTime;
-        //        if (this.cbs.debug)
-        //            Debug.WriteLine("Settling for a semi-cardinal conflict.");
-        //    }
-        //    else
-        //    {
-        //        if (this.cbs.debug)
-        //            Debug.WriteLine("No cardinal conflict found. Choosing a conflict that involves the most conflicting agent.");
-        //        this.ChooseBestConflict(out groupRepA, out groupRepB, out time);
-        //    }
-        //}
-
+        
         private void ChooseFirstConflict(out int groupRepA, out int groupRepB, out int time, out int time2)
         {
 
@@ -1900,214 +951,32 @@ namespace CPF_experiment
             groupRepB = -1; // To quiet the compiler
             time  = int.MaxValue;
             time2 = int.MaxValue;
-            int tempTime;
-            int tempTime2;
-            bool rangeConflictflag = false;
-            double maxConflictProbability = 0;
-            if(cbs.conflictRange != -1)     //not p-robust
-            //if (true)
-                for (int i = 0; i < this.conflictTimesPerAgent.Length; i++)
+            for (int i = 0; i < this.conflictTimesPerAgent.Length; i++)
+            {
+                foreach (var otherAgentNumAndConflictTimes in this.conflictTimesPerAgent[i])
                 {
-                    foreach (var otherAgentNumAndConflictTimes in this.conflictTimesPerAgent[i])
+                    for (int conflictTimeIndex = 0; conflictTimeIndex < otherAgentNumAndConflictTimes.Value.Count; conflictTimeIndex++)
                     {
-                        for (int conflictTimeIndex = 0; conflictTimeIndex < otherAgentNumAndConflictTimes.Value.Count; conflictTimeIndex++)
+                        int conflictTime = otherAgentNumAndConflictTimes.Value[conflictTimeIndex];
+                        if (conflictTime < time)   
                         {
-                            int conflictTime = otherAgentNumAndConflictTimes.Value[conflictTimeIndex];
-                            if (conflictTime < time)   
-                            {
-                                time = conflictTime;    
-                                time2 = time + this.conflictTimesBiasPerAgent[i][otherAgentNumAndConflictTimes.Key][conflictTimeIndex];
-                                groupRepA = i;
-                                groupRepB = this.agentNumToIndex[otherAgentNumAndConflictTimes.Key];
-                            }
+                            time = conflictTime;    
+                            time2 = time;
+                            groupRepA = i;
+                            groupRepB = this.agentNumToIndex[otherAgentNumAndConflictTimes.Key];
                         }
                     }
                 }
-            else        // p-robust
-                for (int i = 0; i < this.conflictTimesPerAgent.Length; i++)
-                {
-                    foreach (var otherAgentNumAndConflictTimes in this.conflictTimesPerAgent[i])
-                    {
-                        for (int conflictTimeIndex = 0; conflictTimeIndex < otherAgentNumAndConflictTimes.Value.Count; conflictTimeIndex++)
-                        {
-                            int conflictTime = otherAgentNumAndConflictTimes.Value[conflictTimeIndex];
-                            tempTime  = conflictTime;
-                            tempTime2 = tempTime + this.conflictTimesBiasPerAgent[i][otherAgentNumAndConflictTimes.Key][conflictTimeIndex];
-                            double conflictProbability = this.conflictProbabilityPerAgent[i][otherAgentNumAndConflictTimes.Key][conflictTimeIndex];
-                            if (/*(maxConflictProbability < conflictProbability && tempTime == tempTime2) ||
-                                (!rangeConflictflag && tempTime == tempTime2)                          ||*/ 
-                                (maxConflictProbability < conflictProbability/* && !rangeConflictflag)*/))
-                            {
-                                maxConflictProbability = conflictProbability;
-                                time = conflictTime;    
-                                time2 = time + this.conflictTimesBiasPerAgent[i][otherAgentNumAndConflictTimes.Key][conflictTimeIndex]; ;
-                                groupRepA = i;
-                                groupRepB = this.agentNumToIndex[otherAgentNumAndConflictTimes.Key];
-                                if (tempTime == tempTime2)
-                                    rangeConflictflag = true;
-                            }
-                        }
-                    }
-                    /*if (!rangeConflictflag)
-                        foreach (var otherAgentNumAndConflictTimes in this.conflictTimesPerAgent[i])
-                        {
-                            for (int conflictTimeIndex = 0; conflictTimeIndex < otherAgentNumAndConflictTimes.Value.Count; conflictTimeIndex++)
-                            {
-                                int conflictTime = otherAgentNumAndConflictTimes.Value[conflictTimeIndex];
-                                double conflictProbability = this.conflictProbabilityPerAgent[i][otherAgentNumAndConflictTimes.Key][conflictTimeIndex];
-                                if (maxConflictProbability < conflictProbability)
-                                {
-                                    maxConflictProbability = conflictProbability;
-                                    time = conflictTime;
-                                    time2 = time + this.conflictTimesBiasPerAgent[i][otherAgentNumAndConflictTimes.Key][conflictTimeIndex]; ;
-                                    groupRepA = i;
-                                    groupRepB = this.agentNumToIndex[otherAgentNumAndConflictTimes.Key];
-                                }
-                            }
-                        }*/
-                }
+            }
         }
 
-        /// <summary>
-        /// Chooses the first agent to be the one that maximizes the number of agents it conflicts with internally divided by 2^(group_size-1).
-        /// Then chooses an agent among the agents it conflicts with using the same formula.
-        /// Then chooses their first conflict.
-        ///
-        /// Choosing the agent that conflicts the most is a greedy strategy.
-        /// Had replanning promised to resolve all conflicts, it would've been better to choose according to the minimum vertex cover.
-        /// 
-        /// Assumes all agents are initially on the same timestep (no OD).
-        /// 
-        /// TODO: Prefer conflicts where one of the conflicting agents is at their goal, to reduce the danger of task blow-up
-        /// by enabling partial expansion. On the other hand, partial expansion is only possible in basic CBS.
-        /// </summary>
-        private void ChooseBestConflict(out int groupRepA, out int groupRepB, out int time)
-        {
-            Func<int, double> formula = i => this.countsOfInternalAgentsThatConflict[i] / ((double)(1 << (this.GetGroupSize(i) - 1)));
-
-            int chosenAgentIndex = Enumerable.Range(0, this.allSingleAgentPlans.Length).MaxByKeyFunc(formula);
-
-            // We could just look for any of this agent's conflicts,
-            // but the best choice among the agents it conflicts with is the one which maximizes the formula itself.
-            IEnumerable<int> conflictsWithAgentNums = this.conflictCountsPerAgent[chosenAgentIndex].Keys;
-            IEnumerable<int> conflictsWithInternallyAgentNums = conflictsWithAgentNums.Where<int>(agentNum => this.agentNumToIndex.ContainsKey(agentNum));
-            IEnumerable<int> conflictsWithInternallyAgentIndices = conflictsWithInternallyAgentNums.Select<int, int>(agentNum => this.agentNumToIndex[agentNum]);
-            int chosenConflictingAgentIndex = conflictsWithInternallyAgentIndices.MaxByKeyFunc(formula);
-
-            groupRepA = chosenAgentIndex;
-            groupRepB = chosenConflictingAgentIndex;
-
-            ProblemInstance problem = this.cbs.GetProblemInstance();
-            time = this.conflictTimesPerAgent[chosenAgentIndex] // Yes, the index of the first and the num of the second
-                                                 [problem.m_vAgents[chosenConflictingAgentIndex].agent.agentNum][0];
-        }
-
-        ///// <summary>
-        ///// Finds the first conflict (timewise) between the first smallest grouped agent that conflicts internally with the most other agents
-        ///// and the first smallest grouped agent that conflicts internally with the most other agents among the agents the prior conflicts with internally,
-        ///// or declares this node as a goal.
-        ///// Choosing the agent that conflicts the most is a greedy strategy.
-        ///// Had replanning promised to resolve all conflicts, it would've been better to choose according to the minimum vertex cover.
-        ///// 
-        ///// Assumes all agents are initially on the same timestep (no OD).
-        ///// 
-        ///// TODO: Save the time of the first conflict too in the perAgent dictionary.
-        ///// Then we won't have to scan the plans for the conflict, and would be able to also prefer eariler conflicts on top of all the above criteria.
-        ///// I think they're more likely to cause big changes in the plan,
-        ///// making the probability the unselected conflicts will be resolved by luck greater.
-        ///// </summary>
-        //private void ChooseConflict()
-        //{
-
-        //    this.conflict = null;
-        //    if (this.allSingleAgentPlans.Length == 1)
-        //        return;
-
-        //    IList<int> agentIndicesThatConflictInternallyWithTheMostAgents = this.countsOfInternalAgentsThatConflict.IndicesOfMax<int>(); // Replanning it can potentially resolve the most conflicts.
-        //    IList<int> smallestGroupedMostConflictingAgentIndices = agentIndicesThatConflictInternallyWithTheMostAgents.AllMax(agentIndex => -1 * this.GetGroupSize(agentIndex));
-        //    int firstSmallestGroupedMostConflictingAgentIndex = smallestGroupedMostConflictingAgentIndices.Min(); // Deterministically tie-breaking is important.
-        //    int numAgentsItConflictsWith = this.countsOfInternalAgentsThatConflict[firstSmallestGroupedMostConflictingAgentIndex];
-
-        //    if (numAgentsItConflictsWith == 0)
-        //        return; // This is a goal node
-
-        //    int maxPlanSize = this.allSingleAgentPlans.Max<SinglePlan>(plan => plan.GetSize());
-
-        //    // We could just look for any of this agent's conflicts,
-        //    // but for efficiency, let's choose a specific agent it conflicts with and look for the first conflict between them,
-        //    // instead of checking all the agents it conflicts with for conflicts on every time step.
-        //    // There has to be an agent it conflicts with since the conflictsCount only counts internal conflicts.
-        //    // The best choice among the agents it conflicts with is the one with the highest conflicts count itself:
-        //    IEnumerable<int> conflictsWithAgentNums = this.conflictCountsPerAgent[firstSmallestGroupedMostConflictingAgentIndex].Keys;
-        //    IEnumerable<int> conflictsWithInternallyAgentNums = conflictsWithAgentNums.Where<int>(agentNum => this.agentNumToIndex.ContainsKey(agentNum));
-        //    IEnumerable<int> conflictsWithInternallyAgentIndices = conflictsWithInternallyAgentNums.Select<int, int>(agentNum => this.agentNumToIndex[agentNum]);
-        //    IList<int> mostConflictingAmongThem = conflictsWithInternallyAgentIndices.AllMax(agentIndex => this.countsOfInternalAgentsThatConflict[agentIndex]);
-        //    IList<int> smallestGroupedAmongThemMostConflictingAmongThem = mostConflictingAmongThem.AllMax(agentIndex => -1 * this.GetGroupSize(agentIndex)); // Smaller groups are easier to replan, and it also promotes a more balanced merging tree
-        //    int firstSmallestGroupedMostConflictingAmongThem = smallestGroupedAmongThemMostConflictingAmongThem.Min(); // Deterministically tie-breaking.
-
-        //    ISet<int> groupA = this.GetGroup(firstSmallestGroupedMostConflictingAgentIndex);
-        //    ISet<int> groupB = this.GetGroup(firstSmallestGroupedMostConflictingAmongThem);
-
-        //    // Check in every time step that the plans do not collide
-        //    for (int time = 1; time < maxPlanSize; time++) // No conflicts assumed in time=0
-        //    {
-        //        foreach (int a in groupA)
-        //            foreach (int b in groupB)
-        //            {
-        //                if (allSingleAgentPlans[a].IsColliding(time, allSingleAgentPlans[b]))
-        //                {
-        //                    int initialTimeStep = this.problem.m_vAgents[0].lastMove.time; // To account for solving partially solved problems.
-        //                    // This assumes the makespan of all the agents is the same.
-        //                    Move first = allSingleAgentPlans[a].GetLocationAt(time);
-        //                    Move second = allSingleAgentPlans[b].GetLocationAt(time);
-        //                    this.conflict = new CbsConflict(a, b, first, second, time + initialTimeStep);
-        //                    return;
-        //                }
-        //            }
-        //    }
-
-        //    throw new Exception("Conflict not found");
-        //}
 
         public CbsConflict GetConflict()
         {
             return this.conflict;
         }
 
-        /// <summary>
-        /// Adopt everything but the new constraint, basically.
-        /// 
-        /// Notice that to correctly adopt a merge child, adopting its new agentsGroupAssignment is necessary.
-        /// Otherwise its conflicts counts, SinglePlan.agentNum and conflict choice would be incompatible.
-        /// </summary>
-        /// <param name="child"></param>
-        public void AdoptSolutionOf(CbsNode child)
-        {
-            Debug.Assert(this.totalCost == child.totalCost, "Tried to adopt node of a different cost");
-            this.agentAExpansion = CbsNode.ExpansionState.NOT_EXPANDED;
-            this.agentBExpansion = CbsNode.ExpansionState.NOT_EXPANDED;
-            this.allSingleAgentCosts = child.allSingleAgentCosts;
-            this.allSingleAgentPlans = child.allSingleAgentPlans;
-            this.conflict = child.conflict;
-            this.isGoal = child.isGoal;
-            this.countsOfInternalAgentsThatConflict = child.countsOfInternalAgentsThatConflict;
-            this.conflictCountsPerAgent = child.conflictCountsPerAgent;
-            this.conflictTimesPerAgent = child.conflictTimesPerAgent;
-            this.conflictTimesBiasPerAgent = child.conflictTimesBiasPerAgent;
-            this.conflictProbabilityPerAgent = child.conflictProbabilityPerAgent;
-            this.totalExternalAgentsThatConflict = child.totalExternalAgentsThatConflict;
-            this.minOpsToSolve = child.minOpsToSolve;
-            this.totalInternalAgentsThatConflict = child.totalInternalAgentsThatConflict;
-            this.agentsGroupAssignment = child.agentsGroupAssignment;
-            this.totalConflictsWithExternalAgents = child.totalConflictsWithExternalAgents;
-            this.totalConflictsBetweenInternalAgents = child.totalConflictsBetweenInternalAgents;
-            this.largerConflictingGroupSize = child.largerConflictingGroupSize;
-
-            this.ChooseConflict(); // child probably hasn't chosen a conflict (and will never get a chance to),
-                                   // need to choose the new conflict to work on.
-                                   // (if child somehow had a conflict already, ChooseConflict does nothing)
-        }
-
+        
         /// <summary>
         /// Uses the group assignments and the constraints.
         /// </summary>
@@ -2173,8 +1042,6 @@ namespace CPF_experiment
         {
             CbsNode other = (CbsNode)item;
 
-            if (cbs.conflictRange == -1) //p-robust
-                return CompareToPRobust(other);
 
             int thisTotalCostPlusH = this.totalCost + this.h;
             int otherTotalCostPlusH = other.totalCost + other.h;
@@ -2187,13 +1054,6 @@ namespace CPF_experiment
             return this.CompareToIgnoreH(other);
         }
 
-        public int CompareToPRobust(CbsNode other)  //for p-robust
-        {
-            if (this.pRobustNoCollisionProb > other.pRobustNoCollisionProb)
-                return -1;
-            else
-                return 1;
-        }
 
         public int CompareToIgnoreH(CbsNode other, bool ignorePartialExpansion = false)
         {
@@ -2224,52 +1084,11 @@ namespace CPF_experiment
             if (other.GoalTest() == true && this.GoalTest() == false)
                 return 1;
 
-            // Prefer nodes which would possibly require less work.
-            // Remember replans and merges don't necessarily enlarge the total cost, so the number of operations needed to solve
-            // sadly can't be added to the node's total cost.
-            if (this.cbs.tieBreakForMoreConflictsOnly == false)
-            {
-                if (this.minOpsToSolve < other.minOpsToSolve)
-                    return -1;
-                if (this.minOpsToSolve > other.minOpsToSolve)
-                    return 1;
-            }
-
-            // Not preferring more depth because it makes no sense. It's not like preferring larger g,
-            // which is smart because that part of the cost isn't an estimate.
-
-            // Prefer less internal conflicts if the minOpsToSolve is the same
-            if (this.totalConflictsBetweenInternalAgents < other.totalConflictsBetweenInternalAgents)
+            if (this.minOpsToSolve < other.minOpsToSolve)
                 return -1;
-            if (this.totalConflictsBetweenInternalAgents > other.totalConflictsBetweenInternalAgents)
+            if (this.minOpsToSolve > other.minOpsToSolve)
                 return 1;
-
-            if (this.totalInternalAgentsThatConflict < other.totalInternalAgentsThatConflict)
-                return -1;
-            if (this.totalInternalAgentsThatConflict > other.totalInternalAgentsThatConflict)
-                return 1;
-
-            if (ignorePartialExpansion == false)
-            {
-                // Prefer partially expanded nodes, in addition to their H bonus.
-                // They're less work because they have less constraints and only one child to generate.
-                // The elaborate form, again, is to keep the comparison consistent. Without it partiallyExpandedA<partiallyExpandedB and partiallyExpandedA>partiallyExpandedB
-                if ((this.agentAExpansion == CbsNode.ExpansionState.DEFERRED || this.agentBExpansion == CbsNode.ExpansionState.DEFERRED) &&
-                    other.agentAExpansion == CbsNode.ExpansionState.NOT_EXPANDED && other.agentBExpansion == CbsNode.ExpansionState.NOT_EXPANDED)
-                    return -1;
-                if ((other.agentAExpansion == CbsNode.ExpansionState.DEFERRED || other.agentBExpansion == CbsNode.ExpansionState.DEFERRED) &&
-                    this.agentAExpansion == CbsNode.ExpansionState.NOT_EXPANDED && this.agentBExpansion == CbsNode.ExpansionState.NOT_EXPANDED)
-                    return 1;
-            }
-
-            // Prefer nodes with conflicts between smaller groups of agents (irrelevant for goal nodes)
-            // This requires that the conflict be chosen already, but we defer choosing the conflict to when
-            // it comes *out* of OPEN, as choosing the conflict may be expensive.
-            //if (this.largerConflictingGroupSize < other.largerConflictingGroupSize)
-            //    return -1;
-            //if (this.largerConflictingGroupSize > other.largerConflictingGroupSize)
-            //    return 1;
-
+            
             return 0;
         }
 
@@ -2285,14 +1104,12 @@ namespace CPF_experiment
         public HashSet<CbsConstraint> GetConstraints()
         {
             var constraints = new HashSet<CbsConstraint>();
-            int currentRange = 0;
             CbsNode current = this;
-            if (cbs.conflictRange > 0)
-                currentRange =  cbs.conflictRange;
+            CbsConstraint currentConstraint = null;
+
             while (current.depth > 0) // The root has no constraints
             {
-                if (cbs.conflictRange == -1)
-                    currentRange = current.constraint.constaintRange;
+
                 if (current.constraint != null && // Next check not enough if "surprise merges" happen (merges taken from adopted child)
                     current.prev.conflict != null && // Can only happen for temporary lookahead nodes the were created and then later the parent adopted a goal node
                     this.agentsGroupAssignment[current.prev.conflict.agentAIndex] !=
@@ -2302,21 +1119,12 @@ namespace CPF_experiment
                     // Nodes that only differ in such irrelevant conflicts will have the same single agent paths.
                     // Dereferencing current.prev is safe because current isn't the root.
                     // Also, merging creates a non-root node with a null constraint, and this helps avoid adding the null to the answer.
-                    for (int i = -currentRange; i <= currentRange; i++)
-                    {
-                        if (current.constraint.move.time + i <= 0)
-                            continue;
-                        if (cbs.constraintPolicy == Run.ConstraintPolicy.Single && i != 0)
-                            continue;
-                        if (cbs.constraintPolicy == Run.ConstraintPolicy.Range  && i < 0)
-                            continue;
-                        if (cbs.constraintPolicy == Run.ConstraintPolicy.DoubleRange && isLeftNode(current) && i != 0)
-                            continue;
-                        CbsConstraint currentConstraint = current.constraint;
-                        TimedMove     currentMove       = current.constraint.move;
-                        CbsConstraint newConstraint = new CbsConstraint(currentConstraint.agentNum, currentMove.x, currentMove.y, currentMove.direction, currentMove.time + i);
-                        constraints.Add(newConstraint);
-                    }
+                    
+                    currentConstraint = current.constraint;
+                    TimedMove     currentMove       = current.constraint.move;
+                    CbsConstraint newConstraint = new CbsConstraint(currentConstraint.agentNum, currentMove.x, currentMove.y, currentMove.direction, currentMove.time);
+                    constraints.Add(newConstraint);
+                    
                 current = current.prev;
             }
             return constraints;
@@ -2354,19 +1162,6 @@ namespace CPF_experiment
             return constraints;
         }
 
-        public HashSet<CbsConstraint> GetMustConstraints()
-        {
-            var constraints = new HashSet<CbsConstraint>();
-            CbsNode current = this;
-            while (current.depth > 0)
-            {
-                if (current.mustConstraint != null) // TODO: Ignore must constraint from merged agents
-                    constraints.Add(current.mustConstraint);
-                current = current.prev;
-            }
-            //constraints.Sort(); // Why?
-            return constraints;
-        }
 
         /// <summary>
         /// IBinaryHeapItem implementation
@@ -2385,56 +1180,7 @@ namespace CPF_experiment
             return new Plan(allSingleAgentPlans);
         }
 
-        /// <summary>
-        /// Check if the agent groups that participate in the conflict of this node pass the merge threshold.
-        /// </summary>
-        /// <param name="mergeThreshold"></param>
-        /// <returns>Whether to merge.</returns>
-        public bool ShouldMerge(int mergeThreshold)
-        {
-            int countConflicts = 1; // The agentA and agentB conflict in this node.
-            ISet<int> firstGroup = this.GetGroup(this.conflict.agentAIndex);
-            ISet<int> secondGroup = this.GetGroup(this.conflict.agentBIndex);
-           // Console.WriteLine("***** " + Run.upperB + " *****");
-           // if (firstGroup.Count + secondGroup.Count > Run.upperB)
-           //     return false;
-            CbsNode current = this.prev;
-            int a, b;
-            while (current != null)
-            {
-                a = current.conflict.agentAIndex;
-                b = current.conflict.agentBIndex;
-                if ((firstGroup.Contains(a) && secondGroup.Contains(b)) || (firstGroup.Contains(b) && secondGroup.Contains(a)))
-                    countConflicts++;
-                current = current.prev;
-            }
-
-            return countConflicts > mergeThreshold;
-        }
-
-        /// <summary>
-        /// Check if the agent groups that participate in the conflict of this node pass the merge threshold,
-        /// using the given conflict counts.
-        /// </summary>
-        /// <param name="mergeThreshold"></param>
-        /// <param name="globalConflictCounter"></param>
-        /// <returns>Whether to merge.</returns>
-        public bool ShouldMerge(int mergeThreshold, int[][] globalConflictCounter)
-        {
-            int conflictCounter = 0;
-            ISet<int> firstGroup = this.GetGroup(this.conflict.agentAIndex);
-            ISet<int> secondGroup = this.GetGroup(this.conflict.agentBIndex);
-
-            foreach (int a in firstGroup)
-            {
-                foreach (int b in secondGroup)
-                {
-                    conflictCounter += globalConflictCounter[Math.Max(a, b)][Math.Min(a, b)];
-                }
-            }
-
-            return conflictCounter > mergeThreshold;
-        }
+       
 
         /// <summary>
         /// Returns a list of indices of agents in the group
@@ -2537,70 +1283,7 @@ namespace CPF_experiment
             return res;
         }
 
-        /// <summary>
-        /// Updates the agentsGroupAssignment and the conflictCountsPerAgent. Warning: changes the hash!
-        /// </summary>
-        /// <param name="a">Index of first group representative</param>
-        /// <param name="b">Index of second group representative</param>
-        public void MergeGroups(int a, int b, bool fixCounts = true)
-        {
-            if (b < a)
-            {
-                int c = a;
-                a = b;
-                b = c;
-            }
-            ProblemInstance problem = this.cbs.GetProblemInstance();
-            int aAgentNum = problem.m_vAgents[a].agent.agentNum;
-            int bAgentNum = problem.m_vAgents[b].agent.agentNum;
-
-            for (int i = 0; i < agentsGroupAssignment.Length; i++)
-            {
-                if (agentsGroupAssignment[i] == b)
-                {
-                    agentsGroupAssignment[i] = (ushort)a;
-                }
-            }
-
-            if (fixCounts)
-            {
-                this.conflictCountsPerAgent[a].Remove(bAgentNum); // It isn't really necessary to update the conflictCountPerAgent dictionaries of the merged agents -
-                // they're about to be replanned and have their dictionaries updated anyway
-                this.conflictTimesPerAgent[a].Remove(bAgentNum);
-                this.conflictTimesBiasPerAgent[a].Remove(bAgentNum);
-                this.conflictProbabilityPerAgent[a].Remove(bAgentNum);
-                this.conflictCountsPerAgent[b].Clear();
-                this.conflictTimesPerAgent[b].Clear();
-                this.conflictTimesBiasPerAgent[b].Clear();
-                this.conflictProbabilityPerAgent[b].Clear();
-
-                for (int i = 0; i < this.conflictCountsPerAgent.Length; i++)
-                {
-                    if (this.conflictCountsPerAgent[i].ContainsKey(bAgentNum))
-                    {
-                        if (this.conflictCountsPerAgent[i].ContainsKey(aAgentNum) == false)
-                            this.conflictCountsPerAgent[i][aAgentNum] = 0;
-                        this.conflictCountsPerAgent[i][aAgentNum] += this.conflictCountsPerAgent[i][bAgentNum];
-                        this.conflictCountsPerAgent[i].Remove(bAgentNum);
-
-                        if (this.conflictTimesPerAgent[i].ContainsKey(aAgentNum) == false)
-                            this.conflictTimesPerAgent[i][aAgentNum] = new List<int>(this.conflictTimesPerAgent[i][bAgentNum].Count);
-                        this.conflictTimesPerAgent[i][aAgentNum].AddRange(this.conflictTimesPerAgent[i][bAgentNum]);
-                        this.conflictTimesPerAgent[i].Remove(bAgentNum);
-
-                        if (this.conflictTimesBiasPerAgent[i].ContainsKey(aAgentNum) == false)
-                            this.conflictTimesBiasPerAgent[i][aAgentNum] = new List<int>(this.conflictTimesBiasPerAgent[i][bAgentNum].Count);
-                        this.conflictTimesBiasPerAgent[i][aAgentNum].AddRange(this.conflictTimesBiasPerAgent[i][bAgentNum]);
-                        this.conflictTimesBiasPerAgent[i].Remove(bAgentNum);
-
-                        if (this.conflictProbabilityPerAgent[i].ContainsKey(aAgentNum) == false)
-                            this.conflictProbabilityPerAgent[i][aAgentNum] = new List<double>(this.conflictProbabilityPerAgent[i][bAgentNum].Count);
-                        this.conflictProbabilityPerAgent[i][aAgentNum].AddRange(this.conflictProbabilityPerAgent[i][bAgentNum]);
-                        this.conflictProbabilityPerAgent[i].Remove(bAgentNum);
-                    }
-                }
-            }
-        }
+      
 
         public void PrintConflict()
         {
@@ -2614,40 +1297,7 @@ namespace CPF_experiment
             Debug.WriteLine("");
         }
 
-        // TODO: Remove use of this method from other CBS's and delete it
-        /// <summary>
-        /// NOT the cost, just the length - 1.
-        /// </summary>
-        /// <param name="agent"></param>
-        /// <returns></returns>
-        public int PathLength(int agent)
-        {
-            List<Move> moves = allSingleAgentPlans[agent].locationAtTimes;
-            Move goal = moves[moves.Count - 1];
-            for (int i = moves.Count - 2; i >= 0; i--)
-            {
-                if (moves[i].Equals(goal) == false) // Note the move that gets to the goal is different to the move that first waits in it.
-                    return  i + 1;
-            }
-            return 0;
-        }
-
-        public bool DoesMustConstraintAllow(CbsConstraint check)
-        {
-            CbsNode current = this;
-            while (current != null)
-            {
-                if (current.mustConstraint != null && !current.mustConstraint.Allows(check))
-                    return false;
-                current = current.prev;
-            }
-            return true;
-        }
-
-        public void SetMustConstraint(CbsConstraint set)
-        {
-            this.mustConstraint = set;
-        }
+       
 
         private bool isGoal = false;
 
@@ -2655,104 +1305,7 @@ namespace CPF_experiment
             return isGoal;
         }
 
-        /// <summary>
-        /// For CBS IDA* only.
-        /// Consider inheriting from CbsNode and overriding the Replan method instead.
-        /// </summary>
-        /// <param name="agentForReplan"></param>
-        /// <param name="depthToReplan"></param>
-        /// <returns></returns>
-        public bool Replan3b(int agentForReplan, int depthToReplan, int minCost = -1)
-        {
-            var internalCAT = new ConflictAvoidanceTable();
-            HashSet<CbsConstraint> newConstraints = this.GetConstraints();
-            ProblemInstance problem = this.cbs.GetProblemInstance();
-            var CAT = (Dictionary_U<TimedMove, int>)problem.parameters[CBS_LocalConflicts.CAT];
-            var constraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.CONSTRAINTS];
-            var mustConstraints = (HashSet_U<CbsConstraint>)problem.parameters[CBS_LocalConflicts.MUST_CONSTRAINTS];
-            HashSet<CbsConstraint> newMustConstraints = this.GetMustConstraints();
-
-            if (newConstraints.Count != 0)
-            {
-                int maxConstraintTimeStep = newConstraints.Max<CbsConstraint>(constraint => constraint.time);
-                depthToReplan = Math.Max(depthToReplan, maxConstraintTimeStep); // Give all constraints a chance to affect the plan
-            }
-
-            List<AgentState> subGroup = new List<AgentState>();
-            int groupNum = this.agentsGroupAssignment[agentForReplan];
-            for (int i = 0; i < agentsGroupAssignment.Length; i++)
-            {
-                if (this.agentsGroupAssignment[i] == groupNum)
-                    subGroup.Add(problem.m_vAgents[i]);
-                else
-                    internalCAT.AddPlan(allSingleAgentPlans[i]);
-            }
-
-            this.replanSize = (ushort)subGroup.Count;
-
-            ICbsSolver relevantSolver = this.solver;
-            if (subGroup.Count == 1)
-                relevantSolver = this.singleAgentSolver;
-
-            ProblemInstance subProblem = problem.Subproblem(subGroup.ToArray());
-            subProblem.parameters = problem.parameters;
-
-            CAT.Join(internalCAT);
-            constraints.Join(newConstraints);
-            mustConstraints.Join(newMustConstraints);
-
-            //constraints.Print();
-
-            relevantSolver.Setup(subProblem, depthToReplan, this.cbs.runner, minCost);
-            bool solved = relevantSolver.Solve();
-
-            relevantSolver.AccumulateStatistics();
-            relevantSolver.ClearStatistics();
-
-            if (solved == false)
-            {
-                CAT.Separate(internalCAT);
-                constraints.Separate(newConstraints);
-                mustConstraints.Separate(newMustConstraints);
-                return false;
-            }
-
-            int j = 0;
-            SinglePlan[] singlePlans = relevantSolver.GetSinglePlans();
-            int[] singleCosts = relevantSolver.GetSingleCosts();
-            for (int i = 0; i < agentsGroupAssignment.Length; i++)
-            {
-                if (this.agentsGroupAssignment[i] == groupNum)
-                {
-                    this.allSingleAgentPlans[i] = singlePlans[j];
-                    this.allSingleAgentPlans[i].agentNum = problem.m_vAgents[groupNum].agent.agentNum; // Use the group's representative
-                    this.allSingleAgentCosts[i] = singleCosts[j];
-                    j++;
-                }
-            }
-            Debug.Assert(j == replanSize);
-
-            // Calc totalCost
-            this.totalCost = (ushort)this.allSingleAgentCosts.Sum();
-
-            // PrintPlan();
-
-            CAT.Separate(internalCAT);
-            constraints.Separate(newConstraints);
-            mustConstraints.Separate(newMustConstraints);
-
-            if (getConflictRange() == -1)
-            {
-                if (this.isPRobustGoal())
-                    this.isGoal = this.cbs.runner.isGoalEmpirically(problem, solver, PRobustBound, singleAgentPathsToList(allSingleAgentPlans));
-            }
-            else
-                this.isGoal = this.countsOfInternalAgentsThatConflict.All(i => i == 0);
-            //this.ChooseConflict(); 
-
-            // PrintConflict();
-            return true;
-        }
+       
     }
 
     /// <summary>
@@ -2766,31 +1319,12 @@ namespace CPF_experiment
         int degree;
         int planCost;
         public int index;
-
-        public AgentToCheckForCardinalConflicts(/*bool hasMDD, int conflictingAgentsWithMDD,*/ int groupSize, int degree,
-                                                int planCost, int index)
-        {
-            //this.hasMDD = hasMDD;
-            //this.conflictingAgentsWithMDD = conflictingAgentsWithMDD;
-            this.groupSize = groupSize;
-            this.degree = degree;
-            this.planCost = planCost;
-            this.index = index;
-        }
+ 
 
         public int CompareTo(IBinaryHeapItem item)
         {
             AgentToCheckForCardinalConflicts other = (AgentToCheckForCardinalConflicts)item;
 
-            /*if (this.hasMDD && !other.hasMDD)
-                return -1;
-            else if (other.hasMDD && !this.hasMDD)
-                return 1;
-
-            if (this.conflictingAgentsWithMDD < other.conflictingAgentsWithMDD)
-                return -1;
-            else if (this.conflictingAgentsWithMDD > other.conflictingAgentsWithMDD)
-                return 1;*/
 
             if (this.groupSize < other.groupSize)
                 return -1;

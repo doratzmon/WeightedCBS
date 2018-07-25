@@ -102,64 +102,37 @@
   <ItemGroup>
     <Compile Include="Agent.cs" />
     <Compile Include="AgentState.cs" />
-    <Compile Include="AStarMDD.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="AStarWithOD.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="AStarWithPartialExpansion.cs" />
-    <Compile Include="AStarWithPartialExpansionBasic.cs" />
     <Compile Include="CBS.cs" />
-    <Compile Include="CbsHeuristic.cs" />
-    <Compile Include="CBS_IDA.cs" />
     <Compile Include="CbsConflict.cs" />
     <Compile Include="DisjointSets.cs" />
-    <Compile Include="MyExtensions.cs" />
     <Compile Include="ConflictAvoidanceTable.cs" />
     <Compile Include="Dictionary_U.cs" />
-    <Compile Include="DynamicRationalLazyOpenList.cs" />
     <Compile Include="IStatisticsCsvWriter.cs" />
     <Compile Include="OpenList.cs" />
-    <Compile Include="DynamicLazyOpenList.cs" />
-    <Compile Include="RandomChoiceOfHeuristic.cs" />
     <Compile Include="HashSet_U.cs" />
     <Compile Include="IBinaryHeapItem.cs" />
-    <Compile Include="CostTreeSearch.cs" />
     <Compile Include="BinaryHeap.cs" />
-    <Compile Include="AdditivePDBs.cs" />
-    <Compile Include="Conflict.cs" />
     <Compile Include="CbsNode.cs" />
     <Compile Include="CbsConstraint.cs" />
-    <Compile Include="MDD.cs" />
     <Compile Include="HeuristicCalculator.cs" />
     <Compile Include="ClassicAStar.cs" />
     <Compile Include="Constants.cs" />
     <Compile Include="ISolver.cs" />
-    <Compile Include="MddMatchAndPrune.cs" />
+    <Compile Include="PDB.cs" />
     <Compile Include="Plan.cs" />
-    <Compile Include="AStarWithRID.cs" />
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <Compile Include="SumIndividualCosts.cs" />
-    <Compile Include="EnumeratedPDB.cs" />
-    <Compile Include="PDB.cs" />
     <Compile Include="ProblemInstance.cs" />
     <Compile Include="Move.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Run.cs" />
-    <Compile Include="Silver.cs" />
-    <Compile Include="CostTreeSearchSolver.cs" />
-    <Compile Include="CostTreeNodeSolver.cs" />
     <Compile Include="TimedMove.cs" />
-    <Compile Include="IndependenceDetection.cs" />
     <Compile Include="WorldState.cs" />
-    <Compile Include="WorldStateForPartialExpansion.cs" />
-    <Compile Include="WorldStateWithOD.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config">

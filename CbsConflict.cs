@@ -29,7 +29,6 @@ namespace CPF_experiment
                 this.vertex = true;
             else
                 this.vertex = false;
-            //this.guaranteedCardinal = false;
         }
 
 

@@ -471,7 +471,7 @@ namespace CPF_experiment
             }
             for (int i = 0; i < this.allAgentsState.Length; i++)
             {
-                this.allAgentsState[i].lastMove.UpdateConflictCounts(conflictAvoidance, this.cbsInternalConflicts, this.conflictTimes, this.conflictTimesBias, this.conflictProbability, conflictRange, countMoves);
+                this.allAgentsState[i].lastMove.UpdateConflictCounts(conflictAvoidance, this.cbsInternalConflicts, this.conflictTimes);
             }
         }
 

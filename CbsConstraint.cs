@@ -10,37 +10,30 @@ namespace CPF_experiment
         public byte agentNum {get; protected set;}
         public TimedMove move {get; protected set;}
         public bool queryInstance = false;
-        public int constaintRange = 0;
 
-        public CbsConstraint(int agentNum, int posX, int posY, Move.Direction direction, int timeStep, int constraintRange = 0)
+        public CbsConstraint(int agentNum, int posX, int posY, Move.Direction direction, int timeStep)
         {
-            this.Init(agentNum, posX, posY, direction, timeStep, constraintRange);
+            this.Init(agentNum, posX, posY, direction, timeStep);
         }
 
-        public CbsConstraint(int agentNum, TimedMove move, int constraintRange = 0)
+        public CbsConstraint(int agentNum, TimedMove move)
         {
-            this.Init(agentNum, move, constraintRange);
+            this.Init(agentNum, move);
         }
 
         public CbsConstraint() : this(-1, -1, -1, Move.Direction.NO_DIRECTION, -1) {} // Nonsense values until Init, just allocate move
 
-        public CbsConstraint(CbsConflict conflict, ProblemInstance instance, bool agentA, Run.ConstraintPolicy constraintPolicy = Run.ConstraintPolicy.Single, int constraintRange = 0)
+        public CbsConstraint(CbsConflict conflict, ProblemInstance instance, bool agentA)
         {
             Move move;
             int agentNum;
             int minTime;
-            this.constaintRange = Math.Abs(conflict.timeStepAgentB - conflict.timeStepAgentA);
-            if (constraintPolicy == Run.ConstraintPolicy.Range)
-                minTime = Math.Min(conflict.timeStepAgentA, conflict.timeStepAgentB);
-            else if (constraintPolicy == Run.ConstraintPolicy.DoubleRange)
+            
+            if (agentA)
                 minTime = conflict.timeStepAgentA;
             else
-            {
-                if (agentA)
-                    minTime = conflict.timeStepAgentA;
-                else
-                    minTime = conflict.timeStepAgentB;
-            }
+                minTime = conflict.timeStepAgentB;
+            
             if (agentA)
             {
                 move = conflict.agentAmove;
@@ -61,16 +54,15 @@ namespace CPF_experiment
                 this.move.direction = Move.Direction.NO_DIRECTION;
         }
 
-        public void Init(int agentNum, int posX, int posY, Move.Direction direction, int timeStep, int constraintRange = 0)
+        public void Init(int agentNum, int posX, int posY, Move.Direction direction, int timeStep)
         {
-            this.Init(agentNum, new TimedMove(posX, posY, direction, timeStep), constraintRange);
+            this.Init(agentNum, new TimedMove(posX, posY, direction, timeStep));
         }
 
-        public void Init(int agentNum, TimedMove move, int constraintRange = 0)
+        public void Init(int agentNum, TimedMove move)
         {
             this.agentNum = (byte)agentNum;
             this.move = move;
-            this.constaintRange = constraintRange;
         }
 
         public int time
@@ -117,7 +109,6 @@ namespace CPF_experiment
                 int ans = 0;
                 ans += this.move.GetHashCode() * 3;
                 ans += this.agentNum * 5;
-                ans += this.constaintRange * 11;
                 return ans;
             }
         }
@@ -134,19 +125,6 @@ namespace CPF_experiment
             return move.ToString() + "-" + move.direction.ToString().PadRight(12) + " time=" + move.time + " agentNum " + agentNum + "";
         }
 
-        /// <summary>
-        /// Kind of the opposite of Equals: checks that the moves are unequal or that not one of the other's agents appears in this.agents.
-        /// </summary>
-        /// <param name="other"></param>
-        /// <returns></returns>
-        public bool Allows(CbsConstraint other)
-        {
-            if (this.move.Equals(other.move) == false) // Minor behavior change: if exactly one move has a set direction, and they're otherwise equal the method used to return true.
-                return true;
-            if (this.agentNum == other.agentNum)
-                return false;
-            return true;
-        }
 
         public int CompareTo(object item)
         {
@@ -155,11 +133,5 @@ namespace CPF_experiment
             return this.move.time.CompareTo(other.move.time);
         }
 
-        public bool ViolatesMustConstraint(byte agent, TimedMove move)
-        {
-            if (this.agentNum != agent)
-                return false;
-            return this.move.Equals(move) == false;
-        }
     }
 }

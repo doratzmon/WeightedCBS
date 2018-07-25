@@ -51,18 +51,6 @@ namespace CPF_experiment
             this.g = copy.g;
         }
 
-        /// <summary>
-        /// Only used by EnumeratedPDB - check if can be removed
-        /// </summary>
-        public void SwapCurrentWithGoal()
-        {
-            int nTemp = lastMove.x;
-            lastMove.x = agent.Goal.x;
-            agent.Goal.x = nTemp;
-            nTemp = lastMove.y;
-            lastMove.y = agent.Goal.y;
-            agent.Goal.y = nTemp;
-        }
 
         /// <summary>
         /// Updates the agent's last move with the given move and sets arrivalTime (at goal) if necessary.
@@ -186,8 +174,6 @@ namespace CPF_experiment
                 return -1;
             if (this.potentialConflicts > that.potentialConflicts)
                 return 1;
-
-            // TODO: Prefer goal nodes.
 
             // Prefer larger g:
             if (this.lastMove.time < that.lastMove.time)

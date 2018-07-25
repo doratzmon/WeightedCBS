@@ -9,7 +9,7 @@ namespace CPF_experiment
     /// <summary>
     /// This is an implementation of the classic A* algorithm for the MAPF problem.
     /// </summary>
-    public class ClassicAStar : ICbsSolver, IMStarSolver
+    public class ClassicAStar : ICbsSolver
     {
         protected ProblemInstance instance;
         protected HeuristicCalculator heuristic;
@@ -18,28 +18,20 @@ namespace CPF_experiment
         protected int solutionDepth;
         protected Dictionary<int, int> conflictCounts;
         protected Dictionary<int, List<int>> conflictTimes;
-        protected Dictionary<int, List<int>> conflictTimesBias;
-        protected Dictionary<int, List<double>> conflictProbability;
         protected int expanded;
         protected int generated;
         protected int reopened;
-        protected int bpmxBoosts;
         protected int reopenedWithOldH;
         protected int noReopenHUpdates;
         protected int maxExpansionDelay;
         protected int closedListHits;
-        protected int mstarBackprops;
-        protected int mstarShuffles;
         protected int accExpanded;
         protected int accGenerated;
         protected int accReopened;
-        protected int accBpmxBoosts;
         protected int accReopenedWithOldH;
         protected int accNoReopenHUpdates;
         protected int accMaxExpansionDelay;
         protected int accClosedListHits;
-        protected int accMstarBackprops;
-        protected int accMstarShuffles;
         public int totalCost;
         public int numOfAgents;
         protected int maxCost;
@@ -48,15 +40,8 @@ namespace CPF_experiment
         /// <summary>
         /// An array of dictionaries that map constrained timesteps to must constraints.
         /// </summary>
-        protected Dictionary<int, TimedMove>[] mustConstraints;
-        protected bool mstar = false;
-        protected bool doMstarShuffle = false;
-        //protected Dictionary<WorldState, SinglePlan[]> mstarPlanBasesToTheirPlans;
-        protected Dictionary<WorldState, HashSet<CbsConstraint>[]> mstarPlanBasesToTheirConstraints; // Most nodes won't have constraints so I don't want to make their memory footprint needlessly large.
-        protected List<CbsConflict> mstarBackPropagationConflictList;
         protected Run runner;
         protected Plan solution;
-        protected int conflictRange;
         /// <summary>
         /// For CBS/A*
         /// </summary>
@@ -65,24 +50,17 @@ namespace CPF_experiment
         /// <summary>
         /// Default constructor.
         /// </summary>
-        public ClassicAStar(HeuristicCalculator heuristic = null, bool mStar = false, bool mStarShuffle = false, int conflictRange = 0)
+        public ClassicAStar(HeuristicCalculator heuristic = null)
         {
             this.closedList = new Dictionary<WorldState, WorldState>();
             this.openList = new OpenList(this);
             this.heuristic = heuristic;
-            
+
             this.queryConstraint = new CbsConstraint();
             this.queryConstraint.queryInstance = true;
 
-            this.mstar = mStar;
-            this.doMstarShuffle = mStarShuffle;
-            this.conflictRange = conflictRange;
         }
 
-        //public virtual void Setup(ProblemInstance problemInstance, int minDepth, Run runner)
-        //{
-        //    this.Setup(problemInstance, minDepth, runner, -1);
-        //}
 
         /// <summary>
         /// Setup the relevant data structures for a run.
@@ -103,48 +81,25 @@ namespace CPF_experiment
             this.singlePlans = null;
             this.conflictCounts = null;
             this.conflictTimes = null;
-            this.conflictTimesBias = null;
-            this.conflictProbability = null;
             this.solutionDepth = -1;
             this.numOfAgents = problemInstance.m_vAgents.Length;
 
+
             // Store parameters used by IndependenceDetection's Independence Detection algorithm
-            if (problemInstance.parameters.ContainsKey(IndependenceDetection.MAXIMUM_COST_KEY))
-                this.maxCost = (int)(problemInstance.parameters[IndependenceDetection.MAXIMUM_COST_KEY]);
+            if (problemInstance.parameters.ContainsKey("ID-max-cost"))
+                this.maxCost = (int)(problemInstance.parameters["ID-max-cost"]);
             else
                 this.maxCost = int.MaxValue;
 
-            if (problemInstance.parameters.ContainsKey(IndependenceDetection.ILLEGAL_MOVES_KEY) &&
-                ((HashSet<TimedMove>)problemInstance.parameters[IndependenceDetection.ILLEGAL_MOVES_KEY]).Count != 0)
-                this.illegalMoves = (HashSet<TimedMove>)(problemInstance.parameters[IndependenceDetection.ILLEGAL_MOVES_KEY]);
+            if (problemInstance.parameters.ContainsKey("ID - reserved") &&
+                ((HashSet<TimedMove>)problemInstance.parameters["ID - reserved"]).Count != 0)
+                this.illegalMoves = (HashSet<TimedMove>)(problemInstance.parameters["ID - reserved"]);
             else
                 this.illegalMoves = null;
 
-            if (problemInstance.parameters.ContainsKey(CBS_LocalConflicts.CONSTRAINTS) &&
-                ((HashSet_U<CbsConstraint>)problemInstance.parameters[CBS_LocalConflicts.CONSTRAINTS]).Count != 0)
-                 this.constraints = (HashSet_U<CbsConstraint>)problemInstance.parameters[CBS_LocalConflicts.CONSTRAINTS];
- 
-             if (problemInstance.parameters.ContainsKey(CBS_LocalConflicts.MUST_CONSTRAINTS) &&
-                 ((HashSet_U<CbsConstraint>)problemInstance.parameters[CBS_LocalConflicts.MUST_CONSTRAINTS]).Count != 0)
-             {
-                 var musts = (HashSet_U<CbsConstraint>)problemInstance.parameters[CBS_LocalConflicts.MUST_CONSTRAINTS];
-                 this.mustConstraints = new Dictionary<int, TimedMove>[musts.Max<CbsConstraint>(con => con.GetTimeStep()) + 1]; // To have index MAX, array needs MAX + 1 places.
-                 foreach (CbsConstraint con in musts)
-                 {
-                     int timeStep = con.GetTimeStep();
-                     if (this.mustConstraints[timeStep] == null)
-                         this.mustConstraints[timeStep] = new Dictionary<int, TimedMove>();
-                     this.mustConstraints[timeStep][con.agentNum] = con.move;
-                 }
-             }
-
-             if (this.mstar)
-             {
-                 root.backPropagationSet = new HashSet<WorldState>();
-                 root.collisionSets = new DisjointSets<int>();
-
-                 this.mstarBackPropagationConflictList = new List<CbsConflict>();
-             }
+            if (problemInstance.parameters.ContainsKey(CBS.CONSTRAINTS) &&
+                ((HashSet_U<CbsConstraint>)problemInstance.parameters[CBS.CONSTRAINTS]).Count != 0)
+                 this.constraints = (HashSet_U<CbsConstraint>)problemInstance.parameters[CBS.CONSTRAINTS];
         }
 
         /// <summary>
@@ -154,7 +109,7 @@ namespace CPF_experiment
         /// <returns>The root of the search tree</returns>
         protected virtual WorldState CreateSearchRoot(int minDepth = -1, int minCost = -1)
         {
-            return new WorldState(this.instance.m_vAgents, minDepth, minCost, conflictRange);
+            return new WorldState(this.instance.m_vAgents, minDepth, minCost);
         }
 
         /// <summary>
@@ -164,7 +119,6 @@ namespace CPF_experiment
         {
             this.openList.Clear();
             this.closedList.Clear();
-            this.mustConstraints = null;
             this.illegalMoves = null;
         }
 
@@ -180,12 +134,8 @@ namespace CPF_experiment
 
         public virtual String GetName()
         {
-            if (this.mstar == false)
-                return "A*";
-            else if (this.doMstarShuffle == false)
-                return "rM*";
-            else
-                return "rM*+shuffle";
+            return "A*";
+
         }
 
         public override string ToString()
@@ -209,29 +159,16 @@ namespace CPF_experiment
             return this.conflictTimes;
         }
 
-        public Dictionary<int, List<int>> GetConflictTimesBias()
-        {
-            return this.conflictTimesBias;
-        }
 
-        public Dictionary<int, List<double>> GetConflictProbability()
-        {
-            return this.conflictProbability;
-        }
-    
-        
         protected void ClearPrivateStatistics()
         {
             this.expanded = 0;
             this.generated = 0;
             this.reopened = 0;
-            this.bpmxBoosts = 0;
             this.reopenedWithOldH = 0;
             this.noReopenHUpdates = 0;
             this.closedListHits = 0;
             this.maxExpansionDelay = -1;
-            this.mstarBackprops = 0;
-            this.mstarShuffles = 0;
         }
 
         public virtual void OutputStatisticsHeader(TextWriter output)
@@ -242,8 +179,6 @@ namespace CPF_experiment
             output.Write(Run.RESULTS_DELIMITER);
             output.Write(this.ToString() + " Reopened");
             output.Write(Run.RESULTS_DELIMITER);
-            output.Write(this.ToString() + " BPMX boosts");
-            output.Write(Run.RESULTS_DELIMITER);
             output.Write(this.ToString() + " Closed List Hits");
             output.Write(Run.RESULTS_DELIMITER);
             output.Write(this.ToString() + " Reopened With Old H");
@@ -252,15 +187,8 @@ namespace CPF_experiment
             output.Write(Run.RESULTS_DELIMITER);
             output.Write(this.ToString() + " Max expansion delay");
             output.Write(Run.RESULTS_DELIMITER);
-            if (this.mstar)
-            {
-                output.Write(this.ToString() + " Backpropagations");
-                output.Write(Run.RESULTS_DELIMITER);
-                output.Write(this.ToString() + " Shuffles");
-                output.Write(Run.RESULTS_DELIMITER);
-            }
 
-            
+
             this.heuristic.OutputStatisticsHeader(output);
 
             this.openList.OutputStatisticsHeader(output);
@@ -274,30 +202,19 @@ namespace CPF_experiment
             Console.WriteLine("Total Expanded Nodes: {0}", this.GetExpanded());
             Console.WriteLine("Total Generated Nodes: {0}", this.GetGenerated());
             Console.WriteLine("Total Reopened Nodes: {0}", this.reopened);
-            Console.WriteLine("Num BPMX boosts: {0}", this.bpmxBoosts);
             Console.WriteLine("Closed list hits: {0}", this.closedListHits);
             Console.WriteLine("Reopened Nodes With Old H: {0}", this.reopenedWithOldH);
             Console.WriteLine("No Reopen H Updates: {0}", this.noReopenHUpdates);
             Console.WriteLine("Max expansion delay: {0}", this.maxExpansionDelay);
-            if (this.mstar)
-            {
-                Console.WriteLine("Backpropagations: {0}", this.mstarBackprops);
-                Console.WriteLine("Shuffles: {0}", this.mstarShuffles);
-            }
+
 
             output.Write(this.expanded + Run.RESULTS_DELIMITER);
             output.Write(this.generated + Run.RESULTS_DELIMITER);
             output.Write(this.reopened + Run.RESULTS_DELIMITER);
-            output.Write(this.bpmxBoosts + Run.RESULTS_DELIMITER);
             output.Write(this.closedListHits + Run.RESULTS_DELIMITER);
             output.Write(this.reopenedWithOldH + Run.RESULTS_DELIMITER);
             output.Write(this.noReopenHUpdates + Run.RESULTS_DELIMITER);
             output.Write(this.maxExpansionDelay + Run.RESULTS_DELIMITER);
-            if (this.mstar)
-            {
-                output.Write(this.mstarBackprops + Run.RESULTS_DELIMITER);
-                output.Write(this.mstarShuffles + Run.RESULTS_DELIMITER);
-            }
 
             this.heuristic.OutputStatistics(output);
 
@@ -308,7 +225,7 @@ namespace CPF_experiment
         {
             get
             {
-                return (this.mstar? 10 : 8) + this.heuristic.NumStatsColumns + this.openList.NumStatsColumns;
+                return this.openList.NumStatsColumns;
             }
         }
 
@@ -324,16 +241,12 @@ namespace CPF_experiment
             this.accExpanded = 0;
             this.accGenerated = 0;
             this.accReopened = 0;
-            this.accBpmxBoosts = 0;
             this.accClosedListHits = 0;
             this.accReopenedWithOldH = 0;
             this.accNoReopenHUpdates = 0;
             this.accMaxExpansionDelay = 0;
-            this.accMstarBackprops = 0;
-            this.accMstarShuffles = 0;
 
             this.heuristic.ClearAccumulatedStatistics();
-
             this.openList.ClearAccumulatedStatistics();
         }
 
@@ -342,13 +255,10 @@ namespace CPF_experiment
             this.accExpanded += this.expanded;
             this.accGenerated += this.generated;
             this.accReopened += this.reopened;
-            this.accBpmxBoosts += this.bpmxBoosts;
             this.accClosedListHits += this.closedListHits;
             this.accReopenedWithOldH += this.reopenedWithOldH;
             this.accNoReopenHUpdates += this.noReopenHUpdates;
             this.accMaxExpansionDelay = Math.Max(this.accMaxExpansionDelay, this.maxExpansionDelay);
-            this.accMstarBackprops += this.mstarBackprops;
-            this.accMstarShuffles += this.mstarShuffles;
 
             this.heuristic.AccumulateStatistics();
 
@@ -360,32 +270,21 @@ namespace CPF_experiment
             Console.WriteLine("{0} Accumulated Expanded Nodes (Low-Level): {1}", this, this.accExpanded);
             Console.WriteLine("{0} Accumulated Generated Nodes (Low-Level): {1}", this, this.accGenerated);
             Console.WriteLine("{0} Accumulated Reopened Nodes (Low-Level): {1}", this, this.accReopened);
-            Console.WriteLine("{0} Accumulated BPMX boosts (Low-Level): {1}", this, this.accBpmxBoosts);
             Console.WriteLine("{0} Accumulated Closed list hits (Low-Level): {1}", this, this.accClosedListHits);
             Console.WriteLine("{0} Accumulated Reopened Nodes With Old H (Low-Level): {1}", this, this.accReopenedWithOldH);
             Console.WriteLine("{0} Accumulated No Reopen H Updates (Low-Level): {1}", this, this.accNoReopenHUpdates);
             Console.WriteLine("{0} Accumulated Max expansion delay (Low-Level): {1}", this, this.accMaxExpansionDelay);
-            if (this.mstar)
-            {
-                Console.WriteLine("{0} Accumulated Backpropagations (Low-Level): {1}", this, this.accMstarBackprops);
-                Console.WriteLine("{0} Accumulated Shuffles (Low-Level): {1}", this, this.accMstarShuffles);
-            }
+
 
             output.Write(this.accExpanded + Run.RESULTS_DELIMITER);
             output.Write(this.accGenerated + Run.RESULTS_DELIMITER);
             output.Write(this.accReopened + Run.RESULTS_DELIMITER);
-            output.Write(this.accBpmxBoosts + Run.RESULTS_DELIMITER);
             output.Write(this.accClosedListHits + Run.RESULTS_DELIMITER);
             output.Write(this.accReopenedWithOldH + Run.RESULTS_DELIMITER);
             output.Write(this.accNoReopenHUpdates + Run.RESULTS_DELIMITER);
             output.Write(this.accMaxExpansionDelay + Run.RESULTS_DELIMITER);
-            if (this.mstar)
-            {
-                output.Write(this.accMstarBackprops + Run.RESULTS_DELIMITER);
-                output.Write(this.accMstarShuffles + Run.RESULTS_DELIMITER);
-            }
 
-            this.heuristic.OutputAccumulatedStatistics(output);
+
 
             this.openList.OutputAccumulatedStatistics(output);
         }
@@ -423,38 +322,8 @@ namespace CPF_experiment
                     Debug.WriteLine("Expanding node: " + currentNode);
                 }
 
-                //if (this.instance.m_vAgents.Length > 2)
-                //{
-                //    int a = 3;
-                //    int b = (a + 2) * 2;
 
-                //    int x1, x2, x3, y1, y2, y3, x4, y4;
-                //    x1 = 5; y1 = 3;
-                //    x2 = 5; y2 = 4;
-                //    x3 = 6; y3 = 2;
-                //    x4 = 5; y4 = 7;
-                //    if (currentNode.allAgentsState[0].lastMove.x == x1 &&
-                //        currentNode.allAgentsState[0].lastMove.y == y1 &&
-                //        currentNode.allAgentsState[1].lastMove.x == x2 &&
-                //        currentNode.allAgentsState[1].lastMove.y == y2 &&
-                //        currentNode.allAgentsState[2].lastMove.x == x3 &&
-                //        currentNode.allAgentsState[2].lastMove.y == y3 &&
-                //        currentNode.allAgentsState[3].lastMove.x == x4 &&
-                //        currentNode.allAgentsState[3].lastMove.y == y4)
-                //    {
-                //        int c = 3;
-                //        int d = 3 * c;
-                //    }
-                //}
-
-                if (this.mstar == false) // Backpropagation can cause the root to be re-expanded after many more expensive nodes were expanded.
-                    ;// Console.WriteLine("fix!!");
-                    //Debug.Assert(currentNode.f >= lastF,
-                     //            "A* node with decreasing F: " + (currentNode.g + currentNode.h) + " < " + lastF + ".");
-                else
-                {
-                    // Record the max F. Assert that the goal's F isn't smaller than it.
-                }
+               
                 lastF = currentNode.f;
                 lastNode = currentNode;
 
@@ -473,8 +342,6 @@ namespace CPF_experiment
                         newList.Add(current.)
                     }*/
                     this.conflictTimes = currentNode.conflictTimes;
-                    this.conflictTimesBias = currentNode.conflictTimesBias;
-                    this.conflictProbability = currentNode.conflictProbability;
 
                     this.totalCost = currentNode.GetGoalCost();
                     this.singleCosts = currentNode.GetSingleCosts();
@@ -482,51 +349,16 @@ namespace CPF_experiment
                     this.singlePlans = currentNode.GetSinglePlans();
                     this.conflictCounts = currentNode.cbsInternalConflicts; // TODO: Technically, could be IndependenceDetection's count. Merge them.
                     this.conflictTimes = currentNode.conflictTimes;
-                    this.conflictTimesBias = currentNode.conflictTimesBias;
-                    this.conflictProbability = currentNode.conflictProbability;
                     this.solutionDepth = this.totalCost - initialEstimate;
                     this.Clear();
                     return true;
                 }
 
-                // Expand
-                if (this.mstar == false)
-                {
-                    if (this.debug)
-                        Debug.Print("");
-                    //Expand(currentNode);
-                }
-                else
-                {
-                    this.mstarBackPropagationConflictList.Clear();
-                    // TODO: Need to clear individual agent planned moves, in case this node was reopened with an updated collision set.
-                    if (this.debug)
-                    {
-                        Console.Write("with collision sets: {0}", currentNode.collisionSets);
-                    }
-                    var sets = currentNode.collisionSets.GetSets();
-                    foreach (var set in sets)
-                    {
-                        if (set.Count != 0)
-                        {
-                        }
-                        // Give each agent in the set a planned move
-                    }
-                }
+                
                 Expand(currentNode);
                 expanded++;
 
-                if (this.mstar && this.mstarBackPropagationConflictList.Count != 0)
-                {
-                    ++this.mstarBackprops;
-                    foreach (var conflict in this.mstarBackPropagationConflictList)
-                    {
-                        //currentNode.individualMStarPlans[conflict.agentAIndex] = null;
-                        //currentNode.individualMStarPlans[conflict.agentBIndex] = null;
-                        this.RMStarCollisionBackPropagation(conflict, currentNode);
-                    }
-                    this.mstarBackPropagationConflictList.Clear();
-                }
+                
             }
 
             totalCost = Constants.NO_SOLUTION_COST;
@@ -575,44 +407,7 @@ namespace CPF_experiment
                 }
             }
 
-            // BPMX (Felner et al. 2005) stage:
-            if ((this.heuristic.GetType() != typeof(SumIndividualCosts)) || (this.openList.GetType() != typeof(OpenList)))
-            // otherwise if we just use SIC and no lazy heuristic in addition to it,
-            // then our heuristic is consistent and BPMX isn't necessary
-            {
-                // Reverse Path-Max
-                WorldState parent = node;
-                int maxChildH = -1;
-                int deltaGOfChildWithMaxH = 0;
-                foreach (var child in finalGeneratedNodes)
-                {
-                    if (child.h > maxChildH)
-                    {
-                        maxChildH = child.h;
-                        deltaGOfChildWithMaxH = child.g - parent.g;
-                    }
-                }
-                if (parent.h < maxChildH - deltaGOfChildWithMaxH)
-                {
-                    int newParentH = maxChildH - deltaGOfChildWithMaxH;
-                    parent.hBonus += newParentH - parent.h;
-                    parent.h = newParentH; // Good for partial expansion algs that reinsert the expanded node into the open list.
-                    ++bpmxBoosts;
-                }
-                // Forward Path-Max
-                foreach (var child in finalGeneratedNodes)
-                {
-                    int deltaG = child.g - parent.g; // == (parent.g + c(parent, current)) - parent.g == c(parent, current)
-
-                    if (child.h < parent.h - deltaG)
-                    {
-                        int newChildH = parent.h - deltaG;
-                        child.hBonus += newChildH - child.h;
-                        child.h = newChildH;
-                        ++bpmxBoosts;
-                    }
-                }
-            }
+            
 
             // Enter the generated nodes into the open list
             foreach (var child in finalGeneratedNodes)
@@ -679,13 +474,7 @@ namespace CPF_experiment
                             continue;
                     }
 
-                    if (this.mustConstraints != null && makespan < this.mustConstraints.Length && // There may be a constraint on the timestep of the generated node
-                        this.mustConstraints[makespan] != null &&
-                        this.mustConstraints[makespan].ContainsKey(agentNum)) // This agent has a must constraint for this time step
-                    {
-                        if (this.mustConstraints[makespan][agentNum].Equals(possibleMove) == false)
-                            continue;
-                    }
+                   
 
                     // If the tile is not free (out of the grid or with an obstacle)
                     if (this.instance.IsValid(possibleMove) == false)
@@ -694,59 +483,7 @@ namespace CPF_experiment
                     // Check against all the agents that have already moved to see if current move collides with their move
                     bool collision;
 
-                    if (this.mstar)
-                    {
-                        bool agentInCollisionSet = fromNode.collisionSets.IsSingle(agentIndex);
-
-                        if (agentInCollisionSet == false) // Only one move allowed
-                        {
-                            bool hasPlan = true;
-
-                            if (hasPlan)
-                            {
-                                // If this move isn't its individually optimal one according to its planned route, return false.
-                                if (this.instance.GetSingleAgentOptimalMove(fromNode.allAgentsState[agentIndex]).Equals(possibleMove) == false)
-                                    continue;
-                            }
-                        }
-
-                        var collidingWith = possibleMove.GetColliding(currentMoves);
-                        collision = collidingWith.Count != 0;
-
-                        if (collision)
-                        {
-                            // It is possible that possibleMove collides with two moves from currentMoves, even though currentMoves contains no collisions:
-                            // Agent 0: 0,0 -> 1,0
-                            // Agent 1: 0,1 -> 0,0
-                            // Agent 2: 1,0 -> 0,0
-                            // Arbitrarily choosing the first colliding agent:
-                            int collidingAgentIndex = collidingWith[0];
-
-                            bool otherAgentInColSet = fromNode.collisionSets.IsSingle(collidingAgentIndex);
-
-                            // Check if one of the colliding agents isn't in the collision set yet
-                            if (agentInCollisionSet == false ||
-                                otherAgentInColSet == false)
-                            {
-                                if (this.debug)
-                                    Debug.Print("Agent planned route collides with another move!");
-                                bool success = false;
-                                var conflict = new CbsConflict(
-                                        agentIndex, collidingAgentIndex, possibleMove,
-                                        intermediateMode.allAgentsState[collidingAgentIndex].lastMove, makespan);
-                                if (this.debug)
-                                    Debug.Print(conflict.ToString());
-                                if (success == false)
-                                {
-                                    this.mstarBackPropagationConflictList.Add(conflict);
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        collision = possibleMove.IsColliding(currentMoves);
-                    }
+                    collision = possibleMove.IsColliding(currentMoves);
 
                     if (collision)
                         continue;
@@ -810,13 +547,6 @@ namespace CPF_experiment
                     return false;
             }
 
-            if (this.mustConstraints != null && makespan < this.mustConstraints.Length && // There may be a constraint on the timestep of the generated node
-                this.mustConstraints[makespan] != null &&
-                this.mustConstraints[makespan].ContainsKey(agentNum)) // This agent has a must constraint for this time step
-            {
-                if (this.mustConstraints[makespan][agentNum].Equals(possibleMove) == false)
-                    return false;
-            }
 
             // If the tile is not free (out of the grid or with an obstacle)
             if (this.instance.IsValid(possibleMove) == false)
@@ -825,138 +555,8 @@ namespace CPF_experiment
             // Check against all the agents that have already moved to see if current move collides with their move
             bool collision;
 
-            if (this.mstar)
-            {
-                bool agentInCollisionSet = fromNode.collisionSets.IsSingle(agentIndex);
-                                            //fromNode.currentCollisionSet.Contains(agentIndex);// ||
-                                            //(fromNode.individualMStarPlanBases[agentIndex] != null &&
-                                            // this.mstarPlanBasesToTheirPlans[fromNode.individualMStarPlanBases[agentIndex]][agentIndex] == null); // Parent plan was abandoned. Imagine a backpropagation happened.
-                
-                if (agentInCollisionSet == false) // Only one move allowed
-                {
-                    bool hasPlan = true;
-                    //// if the agent doesn't have a planned route, give it a planned route, 
-                    ////if (fromNode.individualMStarPlanBases[agentIndex] == null) // No parent plan ever
-                    //if (fromNode.individualMStarPlans[agentIndex] == null) // need to give this agent a plan
-                    //{
-                    //    //fromNode.individualMStarPlanBases[agentIndex] = fromNode;
-                    //    fromNode.individualMStarBookmarks[agentIndex] = 0;
-                    //    //if (this.mstarPlanBasesToTheirPlans.ContainsKey(fromNode) == false)
-                    //    //    this.mstarPlanBasesToTheirPlans[fromNode] = new SinglePlan[this.instance.GetNumOfAgents()];
-                    //    if (fromNode.individualMStarPlans == null)
-                    //        fromNode.individualMStarPlans = new SinglePlan[this.instance.GetNumOfAgents()];
-
-                    //    hasPlan = this.solveOneAgentForMstar(fromNode, agentIndex);
-
-                    //    //if (hasPlan == false)
-                    //    //    this.mstarPlanBasesToTheirPlans[fromNode][agentIndex] = null;
-
-                    //    if (this.debug)
-                    //    {
-                    //        Debug.Print("Agent {0} plan:", agentIndex);
-                    //        //Debug.Print(this.mstarPlanBasesToTheirPlans[fromNode.individualMStarPlanBases[agentIndex]][agentIndex].ToString());
-                    //        Debug.Print(fromNode.individualMStarPlans[agentIndex].ToString());
-                    //    }
-                    //}
-
-                    if (hasPlan)
-                    {
-                        // If this move isn't its individually optimal one according to its planned route, return false.
-                        ////var planBase = fromNode.individualMStarPlanBases[agentIndex];
-                        ////var plan = this.mstarPlanBasesToTheirPlans[planBase][agentIndex];
-                        //var plan = fromNode.individualMStarPlans[agentIndex];
-                        //Move allowed = plan.GetLocationAt(fromNode.individualMStarBookmarks[agentIndex] + 1);
-                        //if (possibleMove.Equals(allowed) == false)
-                        //    return false;
-                        if (this.instance.GetSingleAgentOptimalMove(fromNode.allAgentsState[agentIndex]).Equals(possibleMove) == false)
-                            return false;
-                    }
-                }
-
-                var collidingWith = possibleMove.GetColliding(currentMoves);
-                collision = collidingWith.Count != 0;
-
-                if (collision)
-                {
-                    // It is possible that possibleMove collides with two moves from currentMoves, even though currentMoves contains no collisions:
-                    // Agent 0: 0,0 -> 1,0
-                    // Agent 1: 0,1 -> 0,0
-                    // Agent 2: 1,0 -> 0,0
-                    // Arbitrarily choosing the first colliding agent:
-                    int collidingAgentIndex = collidingWith[0];
-
-                    bool otherAgentInColSet = fromNode.collisionSets.IsSingle(collidingAgentIndex);
-                                                //fromNode.currentCollisionSet.Contains(collidingAgentIndex);// ||
-                                              //(fromNode.individualMStarPlanBases[collidingAgentIndex] != null &&
-                                               //this.mstarPlanBasesToTheirPlans[fromNode.individualMStarPlanBases[collidingAgentIndex]][collidingAgentIndex] == null); // Parent plan was abandoned;
-
-                    // Check if one of the colliding agents isn't in the collision set yet
-                    if (agentInCollisionSet == false || 
-                        otherAgentInColSet == false)
-                    {
-                        if (this.debug)
-                            Debug.Print("Agent planned route collides with another move!");
-                        bool success = false;
-                        var conflict = new CbsConflict(
-                                agentIndex, collidingAgentIndex, possibleMove,
-                                intermediateMode.allAgentsState[collidingAgentIndex].lastMove, makespan);
-                        if (this.debug)
-                            Debug.Print(conflict.ToString());
-                        //if (this.doMstarShuffle && agentInCollisionSet == false)
-                        //{
-                        //    ++this.mstarShuffles;
-                        //    WorldState planStart = fromNode.GetPlanStart(agentIndex);
-                        //    success = this.RMStarShuffleIndividualPath(conflict, true, planStart);
-                        //    if (success)
-                        //    {
-                        //        //this.reinsertIntoOpenList(fromNode.individualMStarPlanBases[agentIndex]);
-                        //        this.reinsertIntoOpenList(planStart);
-                        //        if (this.debug)
-                        //        {
-                        //            Debug.Print("Agent {0} new plan:", agentIndex);
-                        //            //Debug.Print(this.mstarPlanBasesToTheirPlans[fromNode.individualMStarPlanBases[agentIndex]][agentIndex].ToString());
-                        //            Debug.Print(fromNode.individualMStarPlans[agentIndex].ToString());
-                        //        }
-                        //    }
-                        //    else
-                        //    {
-                        //        if (this.debug)
-                        //            Debug.Print("Replanning Agent {0} for the same cost failed", agentIndex);
-                        //    }
-                        //}
-                        //if (this.doMstarShuffle && success == false && otherAgentInColSet == false)
-                        //{
-                        //    ++this.mstarShuffles;
-                        //    WorldState planStart = fromNode.GetPlanStart(collidingAgentIndex);
-                        //    success = this.RMStarShuffleIndividualPath(conflict, false, planStart);
-                        //    if (success)
-                        //    {
-                        //        //this.reinsertIntoOpenList(fromNode.individualMStarPlanBases[collidingAgentIndex]);
-                        //        this.reinsertIntoOpenList(planStart);
-                        //        if (this.debug)
-                        //        {
-                        //            Debug.Print("Agent {0} new plan:", collidingAgentIndex);
-                        //            //Debug.Print(this.mstarPlanBasesToTheirPlans[fromNode.individualMStarPlanBases[collidingAgentIndex]][collidingAgentIndex].ToString());
-                        //            Debug.Print(fromNode.individualMStarPlans[collidingAgentIndex].ToString());
-                        //        }
-                        //    }
-                        //    else
-                        //    {
-                        //        if (this.debug)
-                        //            Debug.Print("Replanning Agent {0} for the same cost failed", collidingAgentIndex);
-                        //    }
-                        //}
-                        if (success == false)
-                        {
-                            this.mstarBackPropagationConflictList.Add(conflict);
-                        }
-                    }
-	            }
-            }
-            else
-            {
-                collision = possibleMove.IsColliding(currentMoves);
-            }
+            
+            collision = possibleMove.IsColliding(currentMoves);
                 
             return collision == false;
         }
@@ -1005,7 +605,7 @@ namespace CPF_experiment
             // Assuming h is an admissable heuristic, no need to generate nodes that won't get us to the goal
             // within the budget
             {
-                if (instance.parameters.ContainsKey(IndependenceDetection.CONFLICT_AVOIDANCE))
+                if (instance.parameters.ContainsKey("ID-ConflictAvoidance"))
                 {
                     // Accumulating the conflicts count from parent to child
                     // We're counting conflicts along the entire path, so the parent's conflicts count is added to the child's:
@@ -1021,7 +621,7 @@ namespace CPF_experiment
                         currentNode.conflictProbability[kvp.Key] = new List<double>(kvp.Value);
 
                     currentNode.UpdateConflictCounts(
-                        ((IReadOnlyDictionary<TimedMove, List<int>>)instance.parameters[IndependenceDetection.CONFLICT_AVOIDANCE]), conflictRange);
+                        ((IReadOnlyDictionary<TimedMove, List<int>>)instance.parameters["ID-ConflictAvoidance"]));
                     // We're counting conflicts along the entire path, so the parent's conflicts count
                     // is added to the child's.
 
@@ -1030,7 +630,7 @@ namespace CPF_experiment
                     // FIXME: The above code duplication with the CBS CAT. Some of the vars above are actually from CBS now.
                 }
 
-                if (instance.parameters.ContainsKey(CBS_LocalConflicts.CAT))
+                if (instance.parameters.ContainsKey(CBS.CAT))
                 {
                     // Accumulating the conflicts count from parent to child.
                     // We're counting conflicts along the entire path, so the parent's conflicts count is added to the child's:
@@ -1046,25 +646,13 @@ namespace CPF_experiment
                         currentNode.conflictProbability[kvp.Key] = new List<double>(kvp.Value);
 
                     currentNode.UpdateConflictCounts(
-                        ((IReadOnlyDictionary<TimedMove, List<int>>)instance.parameters[CBS_LocalConflicts.CAT]), conflictRange);
+                        ((IReadOnlyDictionary<TimedMove, List<int>>)instance.parameters[CBS.CAT]));
 
                     // Count one for every agent the path conflicts with any number of times:
                     currentNode.cbsInternalConflictsCount = currentNode.cbsInternalConflicts.Count;
                 }
 
-                if (this.mstar)
-                {
-                    //currentNode.currentCollisionSet = null; // Clear expansion data
-
-                    currentNode.backPropagationSet = new HashSet<WorldState>();
-                    currentNode.backPropagationSet.Add(currentNode.prevStep);
-
-                    currentNode.collisionSets = new DisjointSets<int>();
-
-                    // Copy parent's individual agent plans
-                    //currentNode.individualMStarPlans = currentNode.prevStep.individualMStarPlans.ToArray<SinglePlan>();
-                    //currentNode.individualMStarBookmarks = currentNode.prevStep.individualMStarBookmarks.ToArray<int>();
-                }
+                
 
                 // If in closed list - only reopen if F is lower or node is otherwise preferred
                 if (this.closedList.ContainsKey(currentNode) == true)
@@ -1073,34 +661,7 @@ namespace CPF_experiment
                     WorldState inClosedList = this.closedList[currentNode];
                     // Notice the agents may have gotten to their location from a different direction in this node.
 
-                    if (this.mstar)
-                    {
-                        if (currentNode.g == inClosedList.g)
-                        {
-                            // Unite backpropagation sets and collision sets of inClosedList and currentNode.
-                            // Notice only only of them is going to survive this method.
-                            foreach (WorldState parent in currentNode.backPropagationSet) // Only one node expected on the backprop list - currentNode's parent. TODO: Assert this?
-                                inClosedList.backPropagationSet.Add(parent);
-                            currentNode.backPropagationSet = inClosedList.backPropagationSet;
-
-                            //// Copy relavant individual paths
-                            //for (int i = 0; i < this.instance.GetNumOfAgents(); i++)
-                            //{
-                            //    if (inClosedList.individualMStarPlanBases[i] != null &&
-
-                            //        currentNode.individualMStarPlanBases[i] == null) // In the case where both nodes have a plan for an agent, arbitrarily choose currentNode's
-                            //    {
-                            //        currentNode.individualMStarPlanBases[i] = inClosedList.individualMStarPlanBases[i];
-                            //        currentNode.individualMStarBookmarks[i] = inClosedList.individualMStarBookmarks[i];
-                            //    }
-                            //}
-                        }
-
-                        //inClosedList.collisionSets.CopyUnions(currentNode.collisionSets); // Not necessary - currentNode has no unions yet
-                        currentNode.collisionSets = inClosedList.collisionSets;
-                        RMStarCollisionBackPropagation(currentNode.collisionSets, currentNode.prevStep); // The collision sets are information about the future,
-                                                                                                         // not the past, so they should 
-                    }
+                    
 
                     // Since the nodes are equal, give them both the max of their H
                     bool improvedHOfThisNode = false;
@@ -1119,28 +680,12 @@ namespace CPF_experiment
                     }
 
                     byte hackData = 0;
-                    if (inClosedList.GetType() == typeof(WorldStateForPartialExpansion))
-                    {
-                        // OPTIMIZATION HACK:
-                        WorldStateForPartialExpansion inClosed = (WorldStateForPartialExpansion)inClosedList;
-                        hackData = (byte)inClosed.targetDeltaF;
-                        inClosed.targetDeltaF = 0;
-                        // This works around the fact that a partially-expanded node implicitly has higher h, which isn't
-                        // copied to currentNode. We don't want currentNode.CompareTo(inClosedList) to be -1 just for this reason.
-                    }
 
-                    int compareVal = currentNode.CompareTo(inClosedList); 
 
-                    if (inClosedList.GetType() == typeof(WorldStateForPartialExpansion))
-                    {
-                        // OPTIMIZATION HACK:
-                        WorldStateForPartialExpansion inClosed = (WorldStateForPartialExpansion)inClosedList;
-                        inClosed.targetDeltaF = hackData;
-                    }
+                    int compareVal = currentNode.CompareTo(inClosedList);
 
-                    if (compareVal == -1 || // This node has smaller f, or preferred due to other consideration.
-                        // Since we equalised their h, a smaller f means smaller g.
-                        (this.mstar && this.doMstarShuffle && currentNode.g == inClosedList.g)) // Enables re-trying a node with different paths for the agents
+
+                    if (compareVal == -1) // Enables re-trying a node with different paths for the agents
                     {
                         this.reopened++;
                         this.closedList.Remove(inClosedList);
@@ -1166,27 +711,7 @@ namespace CPF_experiment
                 }
 
                 if (this.closedList.ContainsKey(currentNode) == false)
-                {
-                    //if (this.instance.m_vAgents.Length > 2)
-                    //{
-                    //    int a = 3;
-                    //    int b = (a + 2) * 2;
-
-                    //    int x1, x2, x3, y1, y2, y3;
-                    //    x1 = 5; y1 = 3;
-                    //    x2 = 2; y2 = 4;
-                    //    x3 = 2; y3 = 2;
-                    //    if (currentNode.allAgentsState[0].lastMove.x == x1 &&
-                    //        currentNode.allAgentsState[0].lastMove.y == y1 &&
-                    //        currentNode.allAgentsState[1].lastMove.x == x2 &&
-                    //        currentNode.allAgentsState[1].lastMove.y == y2 &&
-                    //        currentNode.allAgentsState[2].lastMove.x == x3 &&
-                    //        currentNode.allAgentsState[2].lastMove.y == y3)
-                    //    {
-                    //        int c = 3;
-                    //        int d = 3 * c;
-                    //    }
-                    //}
+                { 
 
                     this.closedList.Add(currentNode, currentNode);
                     this.generated++; // Reopened nodes are also recounted here.

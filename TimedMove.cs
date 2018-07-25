@@ -300,89 +300,22 @@ namespace CPF_experiment
         }
         
         public void UpdateConflictCounts(IReadOnlyDictionary<TimedMove, List<int>> conflictAvoidance,
-                                         Dictionary<int, int> conflictCounts, Dictionary<int, List<int>> conflictTimes, Dictionary<int, List<int>> conflictTimesBias, Dictionary<int, List<double>> conflictProbability, int conflictRange = 0, int timeWithoutDelays = -1)
+                                         Dictionary<int, int> conflictCounts, Dictionary<int, List<int>> conflictTimes)
         {
-            //if(timeWithoutDelays == -1)
-             //   Console.WriteLine("Problem!!!!!!!!!!");
-            double delayProbability = updateCollisionProbability();
-            int saveTime = this.time;
-            int maxPlanFromCA = getMaxPlanFromConflictAvoidance(conflictAvoidance);
-            if (conflictRange >= 0)
-                for (int biasTime = saveTime - conflictRange; biasTime < saveTime + conflictRange + 1; biasTime++)
-                {
-                    this.time = biasTime;
-                    List<int> colliding = this.GetColliding(conflictAvoidance);
-                    foreach (int agentNum in colliding)
-                    {
-                        if (conflictCounts.ContainsKey(agentNum) == false)
-                            conflictCounts[agentNum] = 0;
-                        conflictCounts[agentNum] += 1;
-                        if (conflictTimes.ContainsKey(agentNum) == false)
-                            conflictTimes[agentNum] = new List<int>(4);
-                        if (conflictTimesBias.ContainsKey(agentNum) == false)
-                        {
-                            conflictTimesBias[agentNum] = new List<int>(4);
-                            conflictProbability[agentNum] = new List<double>(4);
-                        }
-                        if (!conflictTimes[agentNum].Contains(saveTime)  ||
-                            (conflictTimes[agentNum].Contains(saveTime) && !conflictTimesBias[agentNum].Contains(this.time - saveTime)))
-                        {
-                            conflictTimes[agentNum].Add(saveTime);
-                            conflictTimesBias[agentNum].Add(this.time - saveTime);
-                            conflictProbability[agentNum].Add(1);
-                        }
-                    }
-                }
-            else if (conflictRange == -1)
+            List<int> colliding = this.GetColliding(conflictAvoidance);
+            foreach (int agentNum in colliding)
             {
-                Dictionary<int, Dictionary<int, TimedMove>> newDic = conflictAvoidanceToDictionary(conflictAvoidance, maxPlanFromCA);
-                for (int biasTime = 0/*- CbsNode.maxPlanSizeForPRobust*/; biasTime < maxPlanFromCA; biasTime++)
-                {
-                    this.time = biasTime;
-                    List<int> colliding = this.GetColliding(conflictAvoidance);
-                    foreach (int agentNum in colliding)
-                    {
-                        if (conflictCounts.ContainsKey(agentNum) == false)
-                            conflictCounts[agentNum] = 0;
-                        conflictCounts[agentNum] += 1;
-                        if (conflictTimes.ContainsKey(agentNum) == false)
-                            conflictTimes[agentNum] = new List<int>(4);
-                        if (conflictTimesBias.ContainsKey(agentNum) == false)
-                        {
-                            conflictTimesBias[agentNum] = new List<int>(4);
-                            conflictProbability[agentNum] = new List<double>(4);
-                        }
-                        if (!conflictTimes[agentNum].Contains(saveTime) ||
-                            (conflictTimes[agentNum].Contains(saveTime) && !conflictTimesBias[agentNum].Contains(this.time - saveTime)))
-                        {
-                            conflictTimes[agentNum].Add(saveTime);
-                            conflictTimesBias[agentNum].Add(this.time - saveTime);
-                            int moves = getMovesCount(newDic[agentNum], this.time);
-                            double collisionProbability;
-                            //Console.WriteLine(moves + " " + timeWithoutDelays);
-                            //if (moves != this.time || timeWithoutDelays != saveTime)
-                            //    Console.WriteLine("Wait wait wait!");
-                            if (timeWithoutDelays == -1)
-                                timeWithoutDelays = moves;
-
-                            if (this.time - saveTime > 0)
-                                collisionProbability = calculateCollisionProbability(delayProbability, this.time - saveTime, timeWithoutDelays, moves);
-                            else
-                                collisionProbability = calculateCollisionProbability(delayProbability, saveTime - this.time, moves, timeWithoutDelays);
-                            
-                            /*
-                            if (moves - timeWithoutDelays > 0)
-                                collisionProbability = calculateCollisionProbability(delayProbability, moves - timeWithoutDelays, timeWithoutDelays);
-                            else
-                                collisionProbability = calculateCollisionProbability(delayProbability, timeWithoutDelays - moves, moves);
-                            */
-                            conflictProbability[agentNum].Add(collisionProbability);
-                        }
-                    }
-                }
+                if (conflictCounts.ContainsKey(agentNum) == false)
+                    conflictCounts[agentNum] = 0;
+                conflictCounts[agentNum] += 1;
+                if (conflictTimes.ContainsKey(agentNum) == false)
+                    conflictTimes[agentNum] = new List<int>(4);
+                conflictTimes[agentNum].Add(this.time);
             }
-            this.time = saveTime;
+
         }
+
+
 
         private int getMovesCount(Dictionary<int, TimedMove> newDic, int time)
         {

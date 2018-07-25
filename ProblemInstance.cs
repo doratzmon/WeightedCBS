@@ -129,8 +129,6 @@ namespace CPF_experiment
         /// </summary>
         public void ComputeSingleAgentShortestPaths()
         {
-            
-
             Debug.WriteLine("Computing the single agent shortest path for all agents...");
             //return; // Add for generator
 
@@ -240,33 +238,25 @@ namespace CPF_experiment
         /// <param name="agentState"></param>
         /// <returns></returns>
         public SinglePlan GetSingleAgentOptimalPlan(AgentState agentState,
-                                                    out Dictionary<int, int> conflictCountPerAgent, out Dictionary<int, List<int>> conflictTimesPerAgent, out Dictionary<int, List<int>> conflictTimesBiasPerAgent, out Dictionary<int, List<double>> conflictProbabilityPerAgent, int conflictRange = 0)
+                                                    out Dictionary<int, int> conflictCountPerAgent, out Dictionary<int, List<int>> conflictTimesPerAgent)
         {
             LinkedList<Move> moves = new LinkedList<Move>();
             int agentNum = agentState.agent.agentNum;
             var conflictCounts  = new Dictionary<int, int>();
             var conflictTimes   = new Dictionary<int, List<int>>();
-            var conflictTimesBias = new Dictionary<int, List<int>>();
-            var conflictProbability = new Dictionary<int, List<double>>();
             IReadOnlyDictionary<TimedMove, List<int>> CAT;
-            if (this.parameters.ContainsKey(CBS_LocalConflicts.CAT)) // TODO: Add support for IndependenceDetection's CAT
-                CAT = ((IReadOnlyDictionary<TimedMove, List<int>>)this.parameters[CBS_LocalConflicts.CAT]);
+            if (this.parameters.ContainsKey(CBS.CAT)) // TODO: Add support for IndependenceDetection's CAT
+                CAT = ((IReadOnlyDictionary<TimedMove, List<int>>)this.parameters[CBS.CAT]);
             else
                 CAT = new Dictionary<TimedMove, List<int>>();
 
-            //for(int tempTime = 0 ; tempTime < agentState.)
-
             TimedMove current = agentState.lastMove; // The starting position
             int time = current.time;
-            int timeWithoutDelays = 0;
             while (true)
             {
                 moves.AddLast(current);
-                if (current.direction != Move.Direction.NO_DIRECTION &&
-                    current.direction != Move.Direction.Wait)
-                    timeWithoutDelays++;
                 // Count conflicts:
-                current.UpdateConflictCounts(CAT, conflictCounts, conflictTimes, conflictTimesBias, conflictProbability, conflictRange, timeWithoutDelays);
+                current.UpdateConflictCounts(CAT, conflictCounts, conflictTimes);
 
                 if (agentState.agent.Goal.Equals(current))
                     break;
@@ -279,8 +269,6 @@ namespace CPF_experiment
 
             conflictCountPerAgent = conflictCounts;
             conflictTimesPerAgent = conflictTimes;
-            conflictTimesBiasPerAgent = conflictTimesBias;
-            conflictProbabilityPerAgent = conflictProbability;
             return new SinglePlan(moves, agentNum);
         }
 
@@ -308,20 +296,6 @@ namespace CPF_experiment
             return this.m_vGrid[0].Length;
         }
 
-        /// <summary>
-        /// Roni: I am not sure when should this be used. It doesn't initialize the grid, 
-        /// so I assume that this is meant to be used when a single problem instance object is used and 
-        /// modified during the search. This should be used with caution, as we are talking about references
-        /// (so if one will change m_vAgents, all the other references to that instance will also point to the same, changed, instance.
-        /// </summary>
-        /// <param name="ags"></param>
-        [Obsolete("Need to have some justification for using this. Currently I believe it will always cause bugs.")]
-        public void Init(AgentState[] ags)
-        {
-            m_vAgents = ags;
-            PrecomputePermutations();
-        }
-        
         /// <summary>
         /// Imports a problem instance from a given file
         /// </summary>
@@ -528,12 +502,12 @@ namespace CPF_experiment
             if (IsValidTile(toCheck.x, toCheck.y) == false)
                 return false;
 
-            if (parameters.ContainsKey(IndependenceDetection.ILLEGAL_MOVES_KEY))
+            if (parameters.ContainsKey("ID-reserved"))
             {
-                var reserved = (HashSet<TimedMove>)parameters[IndependenceDetection.ILLEGAL_MOVES_KEY];
+                var reserved = (HashSet<TimedMove>)parameters["ID-reserved"];
 
                 return (toCheck.IsColliding(reserved) == false);
-            } // FIXME: Should this be here?
+            } 
 
             return true;
         }
